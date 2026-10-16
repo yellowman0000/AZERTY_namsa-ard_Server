@@ -1,15 +1,25 @@
 import { Controller, Post, Get, Body, Param } from '@nestjs/common';
 import { KioskService } from './kiosk.service';
+import { IngestLogDto } from './dto/ingest-log.dto';
 
 @Controller(['api/kiosk', 'kiosk'])
 export class KioskController {
   constructor(private readonly kioskService: KioskService) {}
 
-  // Teammate endpoint: GET /kiosk/status -> connection state of retry logic
-  @Get('status')
-  getStatus() {
-    return { state: this.kioskService.getConnectionState() };
+  // ───────────────────────────────────────────────────────────
+  //  Story 02 – Ingest daily-log / meter-volume
+  //  POST /api/kiosk/logs
+  // ───────────────────────────────────────────────────────────
+
+  @Post('logs')
+  async ingestLog(@Body() dto: IngestLogDto) {
+    return this.kioskService.ingestLog(dto);
   }
+
+  // ───────────────────────────────────────────────────────────
+  //  Existing endpoints
+  // ───────────────────────────────────────────────────────────
+
 
   // POST http://localhost:3001/api/kiosk/heartbeat
   // for Ball to send Heartbeat to Server
