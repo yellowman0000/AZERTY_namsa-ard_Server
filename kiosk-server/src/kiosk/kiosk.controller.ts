@@ -1,9 +1,15 @@
 import { Controller, Post, Get, Body, Param } from '@nestjs/common';
 import { KioskService } from './kiosk.service';
 
-@Controller('api/kiosk')
+@Controller(['api/kiosk', 'kiosk'])
 export class KioskController {
   constructor(private readonly kioskService: KioskService) {}
+
+  // Teammate endpoint: GET /kiosk/status -> connection state of retry logic
+  @Get('status')
+  getStatus() {
+    return { state: this.kioskService.getConnectionState() };
+  }
 
   // POST http://localhost:3001/api/kiosk/heartbeat
   // for Ball to send Heartbeat to Server
