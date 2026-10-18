@@ -18,4 +18,4 @@ async function bootstrap() {
   await app.listen(3001);
   console.log(`Kiosk Backend is running on: http://localhost:3001`);
 }
-bootstrap();
+void bootstrap();

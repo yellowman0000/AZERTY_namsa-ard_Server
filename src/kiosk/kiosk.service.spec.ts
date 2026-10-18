@@ -14,6 +14,7 @@ describe('KioskService', () => {
     };
     dailyLog: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
       create: jest.Mock;
     };
   };
@@ -27,6 +28,7 @@ describe('KioskService', () => {
       },
       dailyLog: {
         findUnique: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
       },
     };
@@ -147,6 +149,64 @@ describe('KioskService', () => {
       await expect(service.ingestLog(validDto)).rejects.toThrow(
         'transactionId "TXN-001" already exists',
       );
+
+      expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException (STATE_CONFLICT) when reading is higher than newer server state', async () => {
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      // Newer record at 11:00 with meterVolume 30, but incoming is at 10:00 with meterVolume 42.5
+      prisma.dailyLog.findFirst.mockImplementation(({ where }: { where: { recordedAt: { gte?: Date; lte?: Date } } }) => {
+        if (where.recordedAt?.gte) {
+          return Promise.resolve({
+            transactionId: 'TXN-NEWER',
+            meterVolume: 30.0,
+            recordedAt: new Date('2026-10-16T11:00:00.000Z'),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      await expect(service.ingestLog(validDto)).rejects.toThrow(
+        ConflictException,
+      );
+
+      try {
+        await service.ingestLog(validDto);
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConflictException);
+        const res = (err as ConflictException).getResponse() as Record<string, unknown>;
+        expect(res.error).toBe('STATE_CONFLICT');
+        expect(res.reason).toBe('HIGHER_THAN_NEWER_READING');
+      }
+
+      expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException (STATE_CONFLICT) when reading is lower than older server state', async () => {
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      // Older record at 09:00 with meterVolume 50, but incoming is at 10:00 with meterVolume 42.5
+      prisma.dailyLog.findFirst.mockImplementation(({ where }: { where: { recordedAt: { gte?: Date; lte?: Date } } }) => {
+        if (where.recordedAt?.lte) {
+          return Promise.resolve({
+            transactionId: 'TXN-OLDER',
+            meterVolume: 50.0,
+            recordedAt: new Date('2026-10-16T09:00:00.000Z'),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      try {
+        await service.ingestLog(validDto);
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(ConflictException);
+        const res = (err as ConflictException).getResponse() as Record<string, unknown>;
+        expect(res.error).toBe('STATE_CONFLICT');
+        expect(res.reason).toBe('LOWER_THAN_OLDER_READING');
+      }
 
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
     });
