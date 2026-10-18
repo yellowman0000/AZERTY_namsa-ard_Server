@@ -1,4 +1,6 @@
-version: '3.8'
+# Pin the project name so volume/network names stay "kiosk-server_*"
+# regardless of the folder name (repo was flattened from kiosk-server/).
+name: kiosk-server
 
 services:
   postgres:
