@@ -19,6 +19,9 @@
     "test:cov": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
     "test:debug": "node --inspect-brk --experimental-vm-modules -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "test:load": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json test/load.e2e-spec.ts",
+    "test:integrity": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json test/payload-integrity.e2e-spec.ts",
+    "benchmark": "ts-node -r tsconfig-paths/register test/benchmark.ts",
     "postinstall": "prisma skills sync || exit 0"
   },
   "dependencies": {
