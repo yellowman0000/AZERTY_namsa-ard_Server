@@ -6,6 +6,7 @@ import { KioskController } from './kiosk.controller';
 import { KioskService } from './kiosk.service';
 import { PrismaService } from '../prisma.service';
 import { STATE_CONFLICT } from './meter-conflict';
+import { computePayloadChecksum } from './checksum-validator';
 
 // ───────────────────────────────────────────────────────────
 //  Story 14-2 – SCRUM-24 (Owner: Earn)
@@ -47,8 +48,8 @@ function createFakePrisma() {
     if (!cond) return true;
     const t = log.recordedAt.getTime();
     if (cond.gte && t < cond.gte.getTime()) return false;
-    if (cond.lte && t > cond.lte.getTime()) return false;
-    return true;
+    return !(cond.lte && t > cond.lte.getTime());
+
   };
 
   return {
@@ -98,14 +99,37 @@ function createFakePrisma() {
 const KIOSK_ID = 'KIOSK-EDGE-001';
 const LOGS_URL = '/api/kiosk/logs';
 
-const validPayload = (overrides: Record<string, unknown> = {}) => ({
-  transactionId: 'TXN-EDGE-001',
-  kioskId: KIOSK_ID,
-  meterVolume: 42.5,
-  recordedAt: '2026-10-17T12:00:00.000Z',
-  checksum: 'a'.repeat(64),
-  ...overrides,
-});
+interface KioskTestPayload {
+  transactionId: string;
+  kioskId: string;
+  meterVolume: number;
+  recordedAt: string;
+  checksum?: string;
+  [key: string]: unknown;
+}
+
+const validPayload = (
+  overrides: Record<string, unknown> = {},
+): KioskTestPayload => {
+  const base = {
+    transactionId: 'TXN-EDGE-001',
+    kioskId: KIOSK_ID,
+    meterVolume: 42.5,
+    recordedAt: '2026-10-17T12:00:00.000Z',
+  };
+  const merged = { ...base, ...overrides };
+  const checksum =
+    'checksum' in overrides
+      ? (overrides.checksum as string | undefined)
+      : computePayloadChecksum({
+          transactionId: String(merged.transactionId ?? ''),
+          kioskId: String(merged.kioskId ?? ''),
+          meterVolume: Number(merged.meterVolume ?? 0),
+          recordedAt: String(merged.recordedAt ?? ''),
+        });
+
+  return { ...merged, checksum };
+};
 
 describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, SCRUM-24)', () => {
   let app: INestApplication<App>;
@@ -347,19 +371,21 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
   // 3. Corrupted payload / checksum
   // ───────────────────────────────────────────────────────────
   describe('3. Corrupted payload & checksum', () => {
-    // KNOWN GAP: the server stores `checksum` but never recomputes it, so a payload
-    // whose fields were corrupted after hashing is accepted. The kiosk client
-    // (src/lib/api.ts) expects HTTP 422 for this case.
-    it.failing('rejects a payload whose checksum does not match its fields (HTTP 422)', async () => {
+    it('rejects a payload whose checksum does not match its fields (HTTP 422)', async () => {
       const res = await postJson(
         validPayload({ transactionId: 'TXN-BAD-HASH', checksum: 'f'.repeat(64) }),
       );
       expect(res.status).toBe(422);
+      expect(res.body).toMatchObject({
+        ack: false,
+        error: 'CORRUPTED_PAYLOAD',
+      });
     });
 
     it('stores the checksum exactly as received', async () => {
-      const checksum = '0123456789abcdef'.repeat(4);
-      const res = await postJson(validPayload({ transactionId: 'TXN-HASH', checksum }));
+      const payload = validPayload({ transactionId: 'TXN-HASH' });
+      const checksum = payload.checksum;
+      const res = await postJson(payload);
 
       expect(res.status).toBe(201);
       expect(prisma.logs[0].checksum).toBe(checksum);
@@ -371,6 +397,23 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
 
       expect(res.status).toBe(201);
       expect(prisma.logs[0].checksum).toBeNull();
+    });
+
+    it('accepts a legacy SHA-256 checksum and stores it (HTTP 201)', async () => {
+      const payloadWithoutChecksum = {
+        transactionId: 'TXN-LEGACY',
+        kioskId: KIOSK_ID,
+        meterVolume: 42.5,
+        recordedAt: '2026-10-17T12:00:00.000Z',
+      };
+      const legacyChecksum = computePayloadChecksum(payloadWithoutChecksum, 'legacy');
+      const res = await postJson({
+        ...payloadWithoutChecksum,
+        checksum: legacyChecksum,
+      });
+
+      expect(res.status).toBe(201);
+      expect(prisma.logs[0].checksum).toBe(legacyChecksum);
     });
   });
 

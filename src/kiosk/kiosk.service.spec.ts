@@ -1,8 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { KioskService } from './kiosk.service';
 import { PrismaService } from '../prisma.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
+import { computePayloadChecksum } from './checksum-validator';
 
 describe('KioskService', () => {
   let service: KioskService;
@@ -50,12 +55,16 @@ describe('KioskService', () => {
   // ─── ingestLog ────────────────────────────────────────────
 
   describe('ingestLog', () => {
-    const validDto: IngestLogDto = {
+    const validRaw = {
       transactionId: 'TXN-001',
       kioskId: 'KIOSK-001',
       meterVolume: 42.5,
       recordedAt: '2026-10-16T10:00:00.000Z',
-      checksum: 'abc123',
+    };
+    const validChecksum = computePayloadChecksum(validRaw);
+    const validDto: IngestLogDto = {
+      ...validRaw,
+      checksum: validChecksum,
     };
 
     it('should create a log and return success with server timestamp', async () => {
@@ -69,7 +78,7 @@ describe('KioskService', () => {
         meterVolume: 42.5,
         recordedAt: new Date('2026-10-16T10:00:00.000Z'),
         createdAt: now,
-        checksum: 'abc123',
+        checksum: validChecksum,
         isSynced: true,
       });
 
@@ -91,7 +100,7 @@ describe('KioskService', () => {
           kioskId: 'KIOSK-001',
           meterVolume: 42.5,
           recordedAt: new Date('2026-10-16T10:00:00.000Z'),
-          checksum: 'abc123',
+          checksum: validChecksum,
         },
       });
     });
@@ -124,6 +133,82 @@ describe('KioskService', () => {
           data: expect.objectContaining({ checksum: null }),
         }),
       );
+    });
+
+    it('should throw UnprocessableEntityException when checksum mismatches payload (Story 14-2)', async () => {
+      const corruptedDto: IngestLogDto = {
+        ...validRaw,
+        checksum: 'f'.repeat(64),
+      };
+
+      await expect(service.ingestLog(corruptedDto)).rejects.toThrow(
+        UnprocessableEntityException,
+      );
+
+      try {
+        await service.ingestLog(corruptedDto);
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(UnprocessableEntityException);
+        const res = (err as UnprocessableEntityException).getResponse() as Record<string, unknown>;
+        expect(res.statusCode).toBe(422);
+        expect(res.ack).toBe(false);
+        expect(res.error).toBe('CORRUPTED_PAYLOAD');
+      }
+
+      expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should accept valid legacy checksum format (Story 14-2)', async () => {
+      const legacyChecksum = computePayloadChecksum(validRaw, 'legacy');
+      const legacyDto: IngestLogDto = {
+        ...validRaw,
+        checksum: legacyChecksum,
+      };
+
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      prisma.dailyLog.create.mockResolvedValue({
+        id: 'uuid-legacy',
+        transactionId: 'TXN-001',
+        kioskId: 'KIOSK-001',
+        meterVolume: 42.5,
+        recordedAt: new Date('2026-10-16T10:00:00.000Z'),
+        createdAt: new Date(),
+        checksum: legacyChecksum,
+        isSynced: true,
+      });
+
+      const result = await service.ingestLog(legacyDto);
+      expect(result.success).toBe(true);
+      expect(prisma.dailyLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ checksum: legacyChecksum }),
+        }),
+      );
+    });
+
+    it('should accept valid version-prefixed checksum (Story 14-2)', async () => {
+      const prefixedChecksum = `v1:${validChecksum}`;
+      const prefixedDto: IngestLogDto = {
+        ...validRaw,
+        checksum: prefixedChecksum,
+      };
+
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      prisma.dailyLog.create.mockResolvedValue({
+        id: 'uuid-prefixed',
+        transactionId: 'TXN-001',
+        kioskId: 'KIOSK-001',
+        meterVolume: 42.5,
+        recordedAt: new Date('2026-10-16T10:00:00.000Z'),
+        createdAt: new Date(),
+        checksum: prefixedChecksum,
+        isSynced: true,
+      });
+
+      const result = await service.ingestLog(prefixedDto);
+      expect(result.success).toBe(true);
     });
 
     it('should throw NotFoundException when kiosk does not exist', async () => {
