@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { computePayloadChecksum } from '../src/kiosk/checksum-validator';
 
 describe('Payload Integrity & Database Write Operations (e2e with Supabase)', () => {
   let app: INestApplication<App>;
@@ -62,8 +63,12 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
   describe('1. Valid Payload Ingestion & Direct Supabase Verification', () => {
     const txnId = 'TXN-INT-VALID-001';
     const recordedAtStr = '2026-10-16T14:30:00.000Z';
-    const checksumHash =
-      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const checksumHash = computePayloadChecksum({
+      transactionId: txnId,
+      kioskId: TEST_KIOSK_ID,
+      meterVolume: 45.75,
+      recordedAt: recordedAtStr,
+    });
 
     it('should successfully write valid telemetry payload and return 201', async () => {
       const payload = {
@@ -104,11 +109,12 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
 
     it('should support payload without optional checksum (persisting null in DB)', async () => {
       const noChecksumTxn = 'TXN-INT-NO-CHECKSUM-001';
+      const noChecksumRecordedAt = '2026-10-16T15:30:00.000Z';
       const payload = {
         transactionId: noChecksumTxn,
         kioskId: TEST_KIOSK_ID,
-        meterVolume: 10.0,
-        recordedAt: recordedAtStr,
+        meterVolume: 60.0,
+        recordedAt: noChecksumRecordedAt,
       };
 
       const res = await request(app.getHttpServer())
@@ -231,7 +237,7 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
       const payload = {
         transactionId: txnId,
         kioskId: TEST_KIOSK_ID,
-        meterVolume: 50.0,
+        meterVolume: 70.0,
         recordedAt: new Date().toISOString(),
         maliciousAdminFlag: true,
         extraInjectedData: 'unauthorized',

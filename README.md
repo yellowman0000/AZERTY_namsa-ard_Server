@@ -71,7 +71,61 @@ All routes are also available under the legacy `/kiosk/*` alias.
 | `bun run build`      | Compile to `dist/`           |
 | `bun run start:prod` | Run compiled build           |
 | `bun run test`       | Unit tests                   |
-| `bun run test:e2e`   | End-to-end tests             |
+| `bun run test:sync`  | Story 14-3 E2E sync verification under unstable network |
+| `bun run test:e2e`   | All end-to-end tests         |
 | `bun run test:cov`   | Test coverage                |
 | `bun run lint`       | Lint with oxlint             |
 | `bunx prisma studio` | Browse the database in a GUI |
+
+## End-to-End Offline Sync Testing (Story 14-3)
+
+The test suite in [`test/offline-sync.e2e-spec.ts`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/offline-sync.e2e-spec.ts) verifies offline data accumulation and automatic synchronization under unstable network conditions as required by **Priority 5 — ID 14-3**.
+
+### Architecture Under Test
+
+A fault-injecting proxy ([`NetworkSimulator`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/support/network-simulator.ts)) sits between the kiosk client ([`KioskSimulator`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/support/kiosk-simulator.ts)) and the real NestJS API server backed by PostgreSQL:
+
+```text
+KioskSimulator (14-1 Queue + 14-2 Checksum)
+       │ (HTTP)
+       ▼
+NetworkSimulator (Proxy: offline, blackhole, packet drop, 503, lost ACKs, jitter)
+       │ (HTTP)
+       ▼
+NestJS Backend Server (`POST /api/kiosk/logs`, `POST /api/kiosk/heartbeat`)
+       │ (Prisma)
+       ▼
+PostgreSQL Database (`kiosks`, `daily_logs`)
+```
+
+### How to Run the Tests
+
+1. Ensure the PostgreSQL database container is running and schema is synced:
+   ```bash
+   docker compose up -d
+   bunx prisma db push
+   ```
+
+2. Run the offline sync test suite:
+   ```bash
+   bun run test:sync
+   ```
+
+   Or run all E2E test suites:
+   ```bash
+   bun run test:e2e
+   ```
+
+### Scenarios Covered
+
+1. **Sprint 1 Specification DoD Cycle**:
+   - `Online` $\rightarrow$ Submit normal reading directly to server.
+   - `Offline` $\rightarrow$ Submit 3 consecutive readings; confirmed queued in local `offline_tx_queue` with SHA-256 v1 checksums.
+   - `Online` $\rightarrow$ Automatic sequential background sync fires; all 3 records persisted to DB and local queue cleared within 10 seconds.
+2. **Page Reload While Offline**: Records stored in client cache persist across simulated browser restarts and auto-sync immediately upon reconnection.
+3. **False `online` Event / Captive Portal**: Verifies dispatcher does not flush until confirmed by a successful `POST /api/kiosk/heartbeat`.
+4. **Lost Response / Server ACK Dropped**: Server commits the record, but ACK is lost due to connection severance; kiosk retries, server returns 409 Conflict, kiosk detects duplicate idempotency ACK and removes from queue without duplicating DB rows.
+5. **Flapping Network Connection**: Intermittent online/offline transitions mid-sync; records remain intact and complete sequential sync.
+6. **Lossy, High-Latency Link**: Packet drop rates, random 503 errors, and latency jitter; retries succeed with backoff.
+7. **Stalled Link (Blackhole)**: Requests hang without immediate error; kiosk request timeout triggers and recovers once link restores.
+8. **Story 14-2 Corrupted Payload Isolation**: Tampered cached records are rejected by server (422) and isolated to `quarantine_queue` without blocking valid pending records.

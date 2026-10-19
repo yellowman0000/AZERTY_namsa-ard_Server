@@ -4,7 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
-import * as crypto from 'crypto';
+import { computePayloadChecksum } from '../src/kiosk/checksum-validator';
 
 describe('Database Write Operations Load & Concurrency Testing (Supabase)', () => {
   let app: INestApplication<App>;
@@ -69,12 +69,17 @@ describe('Database Write Operations Load & Concurrency Testing (Supabase)', () =
       let successCount = 0;
       let failureCount = 0;
 
+      const baseTime = Date.now();
       const payloads = Array.from({ length: TOTAL_REQUESTS }, (_, i) => {
-        const txnId = `TXN-LOAD-${Date.now()}-${i}`;
+        const txnId = `TXN-LOAD-${baseTime}-${i}`;
         const meterVolume = parseFloat((100 + i * 0.75).toFixed(2));
-        const recordedAt = new Date(Date.now() - i * 60000).toISOString();
-        const rawPayload = `${LOAD_KIOSK_ID}:${txnId}:${meterVolume}:${recordedAt}`;
-        const checksum = crypto.createHash('sha256').update(rawPayload).digest('hex');
+        const recordedAt = new Date(baseTime + i * 1000).toISOString();
+        const checksum = computePayloadChecksum({
+          transactionId: txnId,
+          kioskId: LOAD_KIOSK_ID,
+          meterVolume,
+          recordedAt,
+        });
 
         return {
           transactionId: txnId,
@@ -189,8 +194,8 @@ describe('Database Write Operations Load & Concurrency Testing (Supabase)', () =
       const payload = {
         transactionId: RACE_TXN_ID,
         kioskId: LOAD_KIOSK_ID,
-        meterVolume: 77.7,
-        recordedAt: new Date().toISOString(),
+        meterVolume: 500.0,
+        recordedAt: new Date(Date.now() + 500000).toISOString(),
       };
 
       // Dispatch 10 identical requests simultaneously in parallel

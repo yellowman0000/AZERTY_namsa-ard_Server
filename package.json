@@ -21,6 +21,7 @@
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "test:load": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json test/load.e2e-spec.ts",
     "test:integrity": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json test/payload-integrity.e2e-spec.ts",
+    "test:sync": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand --verbose test/offline-sync.e2e-spec.ts",
     "benchmark": "ts-node -r tsconfig-paths/register test/benchmark.ts",
     "postinstall": "prisma skills sync || exit 0"
   },
