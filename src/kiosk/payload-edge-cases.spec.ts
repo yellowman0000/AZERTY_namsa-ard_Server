@@ -426,16 +426,48 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
       expect(res.status).toBe(201);
     };
 
-    it('rejects a duplicate transactionId with 409 (not a STATE_CONFLICT)', async () => {
+    it('confirms a new record with a SYNCHRONIZED ACK (HTTP 201)', async () => {
+      const res = await postJson(validPayload({ transactionId: 'TXN-ACK' }));
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: false,
+        transactionId: 'TXN-ACK',
+        logId: prisma.logs[0].id,
+      });
+    });
+
+    it('re-acknowledges an identical retry of a stored transactionId with 200 and writes nothing', async () => {
       await seed('TXN-DUP', 10, '2026-10-17T10:00:00.000Z');
       const res = await postJson(
         validPayload({ transactionId: 'TXN-DUP', meterVolume: 10, recordedAt: '2026-10-17T10:00:00.000Z' }),
       );
 
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: true,
+        transactionId: 'TXN-DUP',
+        logId: prisma.logs[0].id,
+      });
+      expect(prisma.logs).toHaveLength(1);
+    });
+
+    it('rejects a stored transactionId sent with a different reading (409 DUPLICATE_TRANSACTION, not a STATE_CONFLICT)', async () => {
+      await seed('TXN-DUP', 10, '2026-10-17T10:00:00.000Z');
+      const res = await postJson(
+        validPayload({ transactionId: 'TXN-DUP', meterVolume: 11, recordedAt: '2026-10-17T10:00:00.000Z' }),
+      );
+
       expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ ack: false, error: 'DUPLICATE_TRANSACTION' });
       expect(res.body.error).not.toBe(STATE_CONFLICT);
       expect(res.body.message).toContain('already exists');
       expect(prisma.logs).toHaveLength(1);
+      expect(prisma.logs[0].meterVolume).toBe(10);
     });
 
     it('rejects a reading lower than an older server reading (LOWER_THAN_OLDER_READING)', async () => {

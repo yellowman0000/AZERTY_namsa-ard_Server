@@ -86,6 +86,9 @@ describe('KioskService', () => {
 
       expect(result).toEqual({
         success: true,
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: false,
         logId: 'uuid-1',
         transactionId: 'TXN-001',
         kioskId: 'KIOSK-001',
@@ -224,18 +227,73 @@ describe('KioskService', () => {
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
     });
 
-    it('should throw ConflictException on duplicate transactionId', async () => {
+    // ─── Story 14-3 – server ACK confirmation ───────────────
+
+    const storedLog = {
+      id: 'existing-uuid',
+      transactionId: 'TXN-001',
+      kioskId: 'KIOSK-001',
+      meterVolume: 42.5,
+      recordedAt: new Date('2026-10-16T10:00:00.000Z'),
+      createdAt: new Date('2026-10-16T10:00:05.000Z'),
+      checksum: validChecksum,
+      isSynced: true,
+    };
+
+    it('should re-acknowledge an identical retry of a stored transactionId without inserting (Story 14-3)', async () => {
       prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
-      prisma.dailyLog.findUnique.mockResolvedValue({ id: 'existing-uuid' });
+      prisma.dailyLog.findUnique.mockResolvedValue(storedLog);
 
-      await expect(service.ingestLog(validDto)).rejects.toThrow(
-        ConflictException,
-      );
-      await expect(service.ingestLog(validDto)).rejects.toThrow(
-        'transactionId "TXN-001" already exists',
-      );
+      const result = await service.ingestLog(validDto);
 
+      expect(result).toEqual({
+        success: true,
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: true,
+        logId: 'existing-uuid',
+        transactionId: 'TXN-001',
+        kioskId: 'KIOSK-001',
+        meterVolume: 42.5,
+        recordedAt: storedLog.recordedAt,
+        createdAt: storedLog.createdAt, // time of the first, successful upload
+      });
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+      expect(prisma.dailyLog.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException (DUPLICATE_TRANSACTION, ack: false) when a stored transactionId arrives with a different reading', async () => {
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue({
+        ...storedLog,
+        meterVolume: 40,
+      });
+
+      const err: unknown = await service.ingestLog(validDto).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      const res = (err as ConflictException).getResponse() as Record<string, unknown>;
+      expect(res.ack).toBe(false);
+      expect(res.error).toBe('DUPLICATE_TRANSACTION');
+      expect(res.message).toContain('transactionId "TXN-001" already exists');
+      expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should re-acknowledge when a parallel retry wins the insert race (P2002)', async () => {
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique
+        .mockResolvedValueOnce(null) // not stored yet when checked
+        .mockResolvedValueOnce(storedLog); // stored by the winner
+      prisma.dailyLog.create.mockRejectedValue({ code: 'P2002' });
+
+      const result = await service.ingestLog(validDto);
+
+      expect(result).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: true,
+        logId: 'existing-uuid',
+      });
     });
 
     it('should throw ConflictException (STATE_CONFLICT) when reading is higher than newer server state', async () => {

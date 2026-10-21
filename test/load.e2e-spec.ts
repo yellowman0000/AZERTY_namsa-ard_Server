@@ -215,11 +215,23 @@ describe('Database Write Operations Load & Concurrency Testing (Supabase)', () =
 
       console.log('Race Condition Status Distribution:', statusCounts);
 
-      // Exactly 1 request must succeed (HTTP 201)
+      // Exactly 1 request must create the record (HTTP 201)
       expect(statusCounts[201]).toBe(1);
 
-      // The remaining 9 requests must be safely rejected (HTTP 409 Conflict)
-      expect(statusCounts[409]).toBe(PARALLEL_REQUESTS - 1);
+      // The remaining 9 identical retries are re-acknowledged (HTTP 200 duplicate ACK)
+      expect(statusCounts[200]).toBe(PARALLEL_REQUESTS - 1);
+
+      // Every request gets the same SYNCHRONIZED ACK for the one stored row
+      const logIds = new Set(responses.map((res) => res.body.logId));
+      expect(logIds.size).toBe(1);
+      for (const res of responses) {
+        expect(res.body).toMatchObject({
+          ack: true,
+          status: 'SYNCHRONIZED',
+          transactionId: RACE_TXN_ID,
+          duplicate: res.status === 200,
+        });
+      }
 
       // Supabase must contain strictly 1 record for this transaction
       const dbCount = await prisma.dailyLog.count({

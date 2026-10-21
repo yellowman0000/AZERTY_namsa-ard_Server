@@ -21,11 +21,13 @@ import type { AddressInfo, Socket } from 'net';
 //    drop-request   – connection reset BEFORE the request reaches the server
 //    drop-response  – request IS processed by the server, but the ACK is lost
 //    server-error   – gateway answers 503 without contacting the server
+//    fake-ok        – gateway answers 200 with a captive-portal page, without
+//                     contacting the server (one-shot only, never random)
 // ───────────────────────────────────────────────────────────
 
 export type NetworkMode = 'online' | 'offline' | 'blackhole';
 
-export type FaultKind = 'drop-request' | 'drop-response' | 'server-error';
+export type FaultKind = 'drop-request' | 'drop-response' | 'server-error' | 'fake-ok';
 
 export interface FlakyProfile {
   /** Probability (0–1) that a request is reset before reaching the server. */
@@ -68,6 +70,8 @@ export interface NetworkStats {
   droppedRequests: number;
   droppedResponses: number;
   injectedServerErrors: number;
+  /** 200 responses faked by the gateway (no ACK body, server never contacted). */
+  fakeOkResponses: number;
   /** Requests that actually reached the NestJS server. */
   forwarded: ForwardedRequest[];
 }
@@ -121,6 +125,7 @@ export class NetworkSimulator {
       droppedRequests: 0,
       droppedResponses: 0,
       injectedServerErrors: 0,
+      fakeOkResponses: 0,
       forwarded: [],
     };
   }
@@ -252,6 +257,12 @@ export class NetworkSimulator {
       this.stats.injectedServerErrors++;
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ statusCode: 503, message: 'Simulated gateway error' }));
+      return;
+    }
+    if (fault === 'fake-ok') {
+      this.stats.fakeOkResponses++;
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<html><body>Sign in to continue using Wi-Fi</body></html>');
       return;
     }
 

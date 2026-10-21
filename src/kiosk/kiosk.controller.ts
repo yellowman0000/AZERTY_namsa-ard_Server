@@ -1,4 +1,13 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  Res,
+  HttpStatus,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 
@@ -9,11 +18,19 @@ export class KioskController {
   // ───────────────────────────────────────────────────────────
   //  Story 02 – Ingest daily-log / meter-volume
   //  POST /api/kiosk/logs
+  //
+  //  Story 14-3 – answers with a server ACK (see `sync-ack.ts`):
+  //  201 for a new record, 200 when re-acknowledging a stored one.
   // ───────────────────────────────────────────────────────────
 
   @Post('logs')
-  async ingestLog(@Body() dto: IngestLogDto) {
-    return this.kioskService.ingestLog(dto);
+  async ingestLog(
+    @Body() dto: IngestLogDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ack = await this.kioskService.ingestLog(dto);
+    if (ack.duplicate) res.status(HttpStatus.OK);
+    return ack;
   }
 
   // ───────────────────────────────────────────────────────────

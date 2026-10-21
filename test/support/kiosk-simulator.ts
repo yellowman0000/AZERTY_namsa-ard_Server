@@ -15,8 +15,10 @@ import { createHash, randomUUID } from 'crypto';
 //           HTTP 422 ⇒ record moves to `quarantine_queue`
 //   • 14-3  `online` event ⇒ confirm with POST /api/kiosk/heartbeat ⇒
 //           sequential dispatcher pushes each record to POST /api/kiosk/logs;
-//           a record leaves the queue ONLY on server ACK (200/201, or 409
-//           "already exists" = idempotent duplicate ACK)
+//           a record leaves the queue ONLY on a server ACK – HTTP 200/201 with
+//           `{ ack: true, status: "SYNCHRONIZED" }` for that transaction
+//           (200 = idempotent duplicate ACK) – and is then marked
+//           SYNCHRONIZED in `synced_tx_log`. A bare 2xx is retried.
 //
 //  When the real 14-1 queue is ready, pass it in through the
 //  `OfflineQueueAdapter` option to run the same test against it.
@@ -24,6 +26,12 @@ import { createHash, randomUUID } from 'crypto';
 
 export const QUEUE_KEY = 'offline_tx_queue';
 export const QUARANTINE_KEY = 'quarantine_queue';
+export const SYNCED_KEY = 'synced_tx_log';
+
+/** How many synchronized records `synced_tx_log` keeps (oldest dropped first). */
+export const SYNCED_LOG_LIMIT = 100;
+
+export const SYNCHRONIZED = 'SYNCHRONIZED';
 
 /** Record shape stored in `offline_tx_queue` (snake_case, as in the client). */
 export interface CachedTransaction {
@@ -35,6 +43,12 @@ export interface CachedTransaction {
   checksum_version: 'v1';
   cached_at: string;
   quarantine_reason?: string;
+  /** Set once the server ACKed the record (entries in `synced_tx_log`). */
+  sync_status?: typeof SYNCHRONIZED;
+  /** Server time the record was stored (`createdAt` from the ACK). */
+  synced_at?: string;
+  /** Server row ID (`logId` from the ACK). */
+  server_log_id?: string;
 }
 
 /** Subset of the Web Storage API (window.localStorage satisfies it). */
@@ -110,6 +124,12 @@ export class StorageBackedQueue implements OfflineQueueAdapter {
     return this.read().length;
   }
 
+  /** Drops the oldest items so at most `limit` remain. */
+  keepLast(limit: number): void {
+    const items = this.read();
+    if (items.length > limit) this.write(items.slice(-limit));
+  }
+
   /** Test helper: overwrite raw storage (e.g. to tamper with a record). */
   replaceAll(items: CachedTransaction[]): void {
     this.write(items);
@@ -133,6 +153,31 @@ export function computeV1Checksum(
 interface HttpResult {
   status: number;
   body: Record<string, unknown>;
+}
+
+/** Server ACK body (Story 14-3) – see `src/kiosk/sync-ack.ts`. */
+export interface ServerAck {
+  ack: true;
+  status: typeof SYNCHRONIZED;
+  duplicate: boolean;
+  logId: string;
+  transactionId: string;
+  createdAt: string;
+}
+
+/**
+ * Returns the server ACK for `transactionId`, or `null` when the response is
+ * not one. A 2xx alone (captive portal, misbehaving proxy) does not prove the
+ * record was stored.
+ */
+function readServerAck(res: HttpResult, transactionId: string): ServerAck | null {
+  const { body } = res;
+  const confirmed =
+    (res.status === 200 || res.status === 201) &&
+    body.ack === true &&
+    body.status === SYNCHRONIZED &&
+    body.transactionId === transactionId;
+  return confirmed ? (body as unknown as ServerAck) : null;
 }
 
 class NetworkError extends Error {}
@@ -219,6 +264,7 @@ export class KioskSimulator {
   readonly storage: KeyValueStorage;
   readonly queue: OfflineQueueAdapter;
   readonly quarantine: StorageBackedQueue;
+  readonly synced: StorageBackedQueue;
   readonly events: SyncEvent[] = [];
 
   private readonly baseUrl: string;
@@ -241,6 +287,7 @@ export class KioskSimulator {
     this.storage = opts.storage ?? new MemoryStorage();
     this.queue = opts.queue ?? new StorageBackedQueue(this.storage, QUEUE_KEY);
     this.quarantine = new StorageBackedQueue(this.storage, QUARANTINE_KEY);
+    this.synced = new StorageBackedQueue(this.storage, SYNCED_KEY);
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 5000;
     this.heartbeatRetryDelayMs = opts.heartbeatRetryDelayMs ?? 3000;
     this.retryDelaysMs = opts.retryDelaysMs ?? [2000, 4000, 8000];
@@ -256,6 +303,11 @@ export class KioskSimulator {
   /** "Pending Queue Items" counter shown in the UI. */
   get pendingCount(): number {
     return this.queue.size();
+  }
+
+  /** "Synchronized" counter shown in the UI (last `SYNCED_LOG_LIMIT` records). */
+  get syncedCount(): number {
+    return this.synced.size();
   }
 
   get isSyncing(): boolean {
@@ -317,11 +369,11 @@ export class KioskSimulator {
     if (this.browserOnline && this.state === 'online' && this.queue.size() === 0) {
       try {
         const res = await this.send(record, this.session?.signal);
-        if (res.status === 200 || res.status === 201) {
+        if (readServerAck(res, record.transaction_id)) {
           this.emit('sent-online', record.transaction_id);
           return { via: 'server', record };
         }
-        if (res.status < 500) {
+        if (res.status >= 400 && res.status < 500) {
           this.emit('quarantined', record.transaction_id, `HTTP ${res.status}`);
           return { via: 'rejected', record };
         }
@@ -394,14 +446,17 @@ export class KioskSimulator {
         return;
       }
 
-      let outcome: 'ack' | 'duplicate' | 'quarantine' | 'retry';
+      let outcome: 'ack' | 'quarantine' | 'retry';
+      let ack: ServerAck | null = null;
       let detail = '';
       try {
         const res = await this.send(head, signal);
-        if (res.status === 200 || res.status === 201) {
-          outcome = 'ack';
-        } else if (res.status === 409 && res.body.error !== 'STATE_CONFLICT') {
-          outcome = 'duplicate'; // server already has it → safe ACK
+        ack = readServerAck(res, head.transaction_id);
+        if (ack) {
+          outcome = 'ack'; // includes the 200 duplicate ACK after a lost first ACK
+        } else if (res.status === 200 || res.status === 201) {
+          outcome = 'retry';
+          detail = `HTTP ${res.status} without server ACK`;
         } else if (res.status >= 400 && res.status < 500) {
           outcome = 'quarantine';
           const errMsg =
@@ -424,14 +479,8 @@ export class KioskSimulator {
 
       switch (outcome) {
         case 'ack':
-          this.queue.remove(head.transaction_id);
+          this.markSynchronized(head, ack!);
           attempt = 0;
-          this.emit('ack', head.transaction_id, `pending=${this.queue.size()}`);
-          break;
-        case 'duplicate':
-          this.queue.remove(head.transaction_id);
-          attempt = 0;
-          this.emit('duplicate-ack', head.transaction_id, `pending=${this.queue.size()}`);
           break;
         case 'quarantine':
           this.quarantine.enqueue({ ...head, quarantine_reason: detail });
@@ -449,6 +498,28 @@ export class KioskSimulator {
         }
       }
     }
+  }
+
+  /**
+   * Story 14-3 – the server confirmed the record: mark it SYNCHRONIZED in
+   * `synced_tx_log`, remove it from `offline_tx_queue`, refresh the counters.
+   * Logged before removal, so an interruption can only cause a re-send
+   * (answered with a duplicate ACK), never a lost record.
+   */
+  private markSynchronized(record: CachedTransaction, ack: ServerAck): void {
+    this.synced.enqueue({
+      ...record,
+      sync_status: SYNCHRONIZED,
+      synced_at: ack.createdAt,
+      server_log_id: ack.logId,
+    });
+    this.synced.keepLast(SYNCED_LOG_LIMIT);
+    this.queue.remove(record.transaction_id);
+    this.emit(
+      ack.duplicate ? 'duplicate-ack' : 'ack',
+      record.transaction_id,
+      `pending=${this.pendingCount} synced=${this.syncedCount}`,
+    );
   }
 
   private send(record: CachedTransaction, signal?: AbortSignal): Promise<HttpResult> {

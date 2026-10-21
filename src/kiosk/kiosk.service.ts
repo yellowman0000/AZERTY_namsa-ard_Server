@@ -1,16 +1,22 @@
 import { PrismaService } from '../prisma.service';
-import {
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IngestLogDto } from './dto/ingest-log.dto';
-import { findMeterConflict, toStateConflictException } from './meter-conflict';
+import {
+  findMeterConflict,
+  toStateConflictException,
+  IncomingReading,
+} from './meter-conflict';
 import {
   verifyPayloadChecksum,
   toCorruptedPayloadException,
 } from './checksum-validator';
+import {
+  isSameReading,
+  toDuplicateTransactionException,
+  toSyncAck,
+  StoredLog,
+  SyncAck,
+} from './sync-ack';
 
 @Injectable()
 export class KioskService {
@@ -26,13 +32,17 @@ export class KioskService {
    *
    * - Recomputes and verifies SHA-256 hash against `checksum` (Story 14-2).
    * - Validates that the referenced kiosk exists.
-   * - Rejects duplicate `transactionId` values (idempotency).
+   * - Idempotency: an identical retry of a stored `transactionId` is
+   *   acknowledged again instead of inserted twice; a different reading
+   *   under the same `transactionId` is rejected (Story 14-3, see `sync-ack.ts`).
    * - Rejects readings that conflict with server state for the same kiosk
    *   (Story 14-2, see `meter-conflict.ts`).
    * - Generates the server-side `createdAt` timestamp automatically
    *   via Prisma's `@default(now())`.
+   * - Returns an explicit ACK (`ack: true, status: "SYNCHRONIZED"`) so the
+   *   kiosk knows it may mark its local record as synchronized.
    */
-  async ingestLog(dto: IngestLogDto) {
+  async ingestLog(dto: IngestLogDto): Promise<SyncAck> {
     // 1. Story 14-2 – Verify SHA-256 checksum if provided
     if (dto.checksum !== undefined && dto.checksum !== null) {
       const isValid = verifyPayloadChecksum(
@@ -66,23 +76,22 @@ export class KioskService {
       );
     }
 
-    // 3. Check for duplicate transactionId (idempotency)
+    const incoming: IncomingReading = {
+      kioskId: dto.kioskId,
+      meterVolume: dto.meterVolume,
+      recordedAt: new Date(dto.recordedAt),
+    };
+
+    // 3. Idempotency – a retry whose first ACK was lost gets the ACK again
     const existing = await this.prisma.dailyLog.findUnique({
       where: { transactionId: dto.transactionId },
     });
 
     if (existing) {
-      throw new ConflictException(
-        `A log with transactionId "${dto.transactionId}" already exists.`,
-      );
+      return this.acknowledgeExisting(existing, incoming);
     }
 
     // 4. Story 14-2 – reject readings that conflict with server state
-    const incoming = {
-      kioskId: dto.kioskId,
-      meterVolume: dto.meterVolume,
-      recordedAt: new Date(dto.recordedAt),
-    };
     const conflict = await findMeterConflict(this.prisma, incoming);
 
     if (conflict) {
@@ -108,15 +117,7 @@ export class KioskService {
         `Ingested log ${log.id} for kiosk ${log.kioskId} (txn: ${log.transactionId})`,
       );
 
-      return {
-        success: true,
-        logId: log.id,
-        transactionId: log.transactionId,
-        kioskId: log.kioskId,
-        meterVolume: log.meterVolume,
-        recordedAt: log.recordedAt,
-        createdAt: log.createdAt, // server-side timestamp
-      };
+      return toSyncAck(log, false);
     } catch (err: unknown) {
       if (
         typeof err === 'object' &&
@@ -124,12 +125,36 @@ export class KioskService {
         'code' in err &&
         (err as { code: string }).code === 'P2002'
       ) {
-        throw new ConflictException(
-          `A log with transactionId "${dto.transactionId}" already exists.`,
-        );
+        // A parallel retry of the same transaction was stored first
+        const winner = await this.prisma.dailyLog.findUnique({
+          where: { transactionId: dto.transactionId },
+        });
+        if (winner) return this.acknowledgeExisting(winner, incoming);
+        throw toDuplicateTransactionException(dto.transactionId);
       }
       throw err;
     }
+  }
+
+  /**
+   * Story 14-3 – re-acknowledge a `transactionId` that is already stored.
+   * Only an identical reading counts as a retry; anything else is a conflict.
+   */
+  private acknowledgeExisting(
+    existing: StoredLog,
+    incoming: IncomingReading,
+  ): SyncAck {
+    if (!isSameReading(existing, incoming)) {
+      this.logger.warn(
+        `Transaction ${existing.transactionId} reused with a different reading for kiosk ${incoming.kioskId}`,
+      );
+      throw toDuplicateTransactionException(existing.transactionId);
+    }
+
+    this.logger.log(
+      `Re-acknowledged log ${existing.id} for kiosk ${existing.kioskId} (txn: ${existing.transactionId})`,
+    );
+    return toSyncAck(existing, true);
   }
 
   // ───────────────────────────────────────────────────────────

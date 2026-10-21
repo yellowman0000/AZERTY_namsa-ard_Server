@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
 import { NetworkSimulator } from './support/network-simulator';
 import {
+  computeV1Checksum,
   KioskSimulator,
   KioskSimulatorOptions,
   MemoryStorage,
@@ -155,6 +156,20 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     expect(kiosk.pendingCount).toBe(0);
     expect(kiosk.quarantine.size()).toBe(0);
 
+    // Each ACKed record is marked SYNCHRONIZED locally, linked to its server row
+    expect(kiosk.syncedCount).toBe(3);
+    for (const entry of kiosk.synced.peekAll()) {
+      const row = rows.find((r) => r.transactionId === entry.transaction_id);
+      expect(entry.sync_status).toBe('SYNCHRONIZED');
+      expect(entry.server_log_id).toBe(row!.id);
+      expect(entry.synced_at).toBe(row!.createdAt.toISOString());
+    }
+    expect(kiosk.events.filter((e) => e.type === 'ack').map((e) => e.detail)).toEqual([
+      'pending=2 synced=1',
+      'pending=1 synced=2',
+      'pending=0 synced=3',
+    ]);
+
     // Sequential FIFO dispatch: server received the offline records in submission order
     const sentOrder = network
       .forwardedLogs()
@@ -221,7 +236,7 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
   // ─────────────────────────────────────────────────────────
   //  4. ACK lost: the server stored the record but the response never arrived
   // ─────────────────────────────────────────────────────────
-  it('lost ACKs are retried and the 409 duplicate is treated as ACK – no duplicate rows', async () => {
+  it('lost ACKs are retried and the server re-ACKs them with 200 – no duplicate rows', async () => {
     const kiosk = newKiosk();
     expect(await kiosk.heartbeat()).toBe(true);
 
@@ -245,7 +260,14 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     }
     expect(network.stats.droppedResponses).toBe(2);
     expect(kiosk.events.filter((e) => e.type === 'duplicate-ack')).toHaveLength(2);
+    // The retried uploads were answered 200 (already stored), not 201 or 409
+    const reAcked = network.forwardedLogs().filter((r) => r.status === 200);
+    expect(reAcked.map((r) => r.transactionId)).toEqual([
+      recs[0].transaction_id,
+      recs[2].transaction_id,
+    ]);
     expect(kiosk.pendingCount).toBe(0);
+    expect(kiosk.syncedCount).toBe(3);
     expect(kiosk.quarantine.size()).toBe(0);
   }, 30_000);
 
@@ -370,5 +392,74 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     expect(quarantined).toHaveLength(1);
     expect(quarantined[0].transaction_id).toBe(recs[1].transaction_id);
     expect(quarantined[0].quarantine_reason).toContain('422');
+    // Only the records the server ACKed are marked SYNCHRONIZED
+    expect(kiosk.synced.peekAll().map((r) => r.transaction_id)).toEqual([
+      recs[0].transaction_id,
+      recs[2].transaction_id,
+    ]);
+  }, 30_000);
+
+  // ─────────────────────────────────────────────────────────
+  //  9. Task 3 (Sour): a 2xx is not an ACK unless the server confirms it
+  // ─────────────────────────────────────────────────────────
+  it('does not mark a record Synchronized on a 200 without a server ACK (captive portal)', async () => {
+    const kiosk = newKiosk();
+    expect(await kiosk.heartbeat()).toBe(true);
+
+    cutNetwork(kiosk);
+    const recs = [];
+    for (const v of [7, 8, 9]) recs.push((await kiosk.submitReading(v)).record);
+
+    // First upload is answered by a captive portal: HTTP 200, but an HTML page
+    network.injectFaults({
+      kind: 'fake-ok',
+      pathIncludes: '/logs',
+      transactionId: recs[0].transaction_id,
+    });
+
+    restoreNetwork(kiosk);
+    await kiosk.waitUntilSynced(SYNC_DEADLINE_MS);
+
+    expect(network.stats.fakeOkResponses).toBe(1);
+    const retry = kiosk.events.find((e) => e.type === 'retry');
+    expect(retry?.transactionId).toBe(recs[0].transaction_id);
+    expect(retry?.detail).toContain('HTTP 200 without server ACK');
+
+    const rows = await dbLogs(kiosk.kioskId);
+    expect(rows.map((r) => r.transactionId)).toEqual(recs.map((r) => r.transaction_id));
+    expect(kiosk.synced.peekAll().map((r) => r.transaction_id)).toEqual(
+      recs.map((r) => r.transaction_id),
+    );
+    expect(kiosk.pendingCount).toBe(0);
+  }, 30_000);
+
+  // ─────────────────────────────────────────────────────────
+  //  10. Task 3 (Sour): a 409 for a reused transactionId is not an ACK
+  // ─────────────────────────────────────────────────────────
+  it('quarantines a record whose transactionId the server already stores with a different reading', async () => {
+    const storage = new MemoryStorage();
+    const kiosk = newKiosk({ storage });
+    expect(await kiosk.heartbeat()).toBe(true);
+    const stored = (await kiosk.submitReading(40)).record;
+
+    cutNetwork(kiosk);
+    const next = (await kiosk.submitReading(50)).record;
+
+    // Client bug: the new reading is cached under the already-stored transactionId
+    const clash = { ...next, transaction_id: stored.transaction_id };
+    clash.checksum = computeV1Checksum(clash);
+    new StorageBackedQueue(storage).replaceAll([clash]);
+
+    restoreNetwork(kiosk);
+    await kiosk.waitUntilSynced(SYNC_DEADLINE_MS);
+
+    const rows = await dbLogs(kiosk.kioskId);
+    expect(rows.map((r) => [r.transactionId, r.meterVolume])).toEqual([
+      [stored.transaction_id, 40],
+    ]);
+    expect(kiosk.syncedCount).toBe(0);
+    const quarantined = kiosk.quarantine.peekAll();
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0].quarantine_reason).toBe('HTTP 409 DUPLICATE_TRANSACTION');
   }, 30_000);
 });

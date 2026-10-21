@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import type { Response } from 'express';
 import { KioskController } from './kiosk.controller';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
@@ -33,31 +34,53 @@ describe('KioskController', () => {
   });
 
   describe('POST /logs (ingestLog)', () => {
-    it('should call kioskService.ingestLog and return the result', async () => {
-      const dto: IngestLogDto = {
-        transactionId: 'TXN-001',
-        kioskId: 'KIOSK-001',
-        meterVolume: 42.5,
-        recordedAt: '2026-10-16T10:00:00.000Z',
-        checksum: 'abc123',
+    const dto: IngestLogDto = {
+      transactionId: 'TXN-001',
+      kioskId: 'KIOSK-001',
+      meterVolume: 42.5,
+      recordedAt: '2026-10-16T10:00:00.000Z',
+      checksum: 'abc123',
+    };
+
+    const ackFor = (duplicate: boolean) => ({
+      success: true,
+      ack: true,
+      status: 'SYNCHRONIZED',
+      duplicate,
+      logId: 'uuid-1',
+      transactionId: 'TXN-001',
+      kioskId: 'KIOSK-001',
+      meterVolume: 42.5,
+      recordedAt: new Date('2026-10-16T10:00:00.000Z'),
+      createdAt: new Date(),
+    });
+
+    const mockResponse = () =>
+      ({ status: jest.fn().mockReturnThis() }) as unknown as Response & {
+        status: jest.Mock;
       };
 
-      const expected = {
-        success: true,
-        logId: 'uuid-1',
-        transactionId: 'TXN-001',
-        kioskId: 'KIOSK-001',
-        meterVolume: 42.5,
-        recordedAt: new Date('2026-10-16T10:00:00.000Z'),
-        createdAt: new Date(),
-      };
-
+    it('should call kioskService.ingestLog and return the ACK (default 201)', async () => {
+      const expected = ackFor(false);
       service.ingestLog.mockResolvedValue(expected);
+      const res = mockResponse();
 
-      const result = await controller.ingestLog(dto);
+      const result = await controller.ingestLog(dto, res);
 
       expect(result).toEqual(expected);
       expect(service.ingestLog).toHaveBeenCalledWith(dto);
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('should answer 200 when re-acknowledging an already stored record (Story 14-3)', async () => {
+      const expected = ackFor(true);
+      service.ingestLog.mockResolvedValue(expected);
+      const res = mockResponse();
+
+      const result = await controller.ingestLog(dto, res);
+
+      expect(result).toEqual(expected);
+      expect(res.status).toHaveBeenCalledWith(200);
     });
   });
 });

@@ -294,23 +294,11 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
   // ───────────────────────────────────────────────────────────
   describe('4. Idempotency & Duplicate Rejection', () => {
     const duplicateTxn = 'TXN-INT-DUP-001';
+    let firstPayload: Record<string, unknown>;
+    let firstLogId: string;
 
     it('should accept first submission of transaction', async () => {
-      const payload = {
-        transactionId: duplicateTxn,
-        kioskId: TEST_KIOSK_ID,
-        meterVolume: 88.8,
-        recordedAt: new Date().toISOString(),
-      };
-
-      await request(app.getHttpServer())
-        .post('/api/kiosk/logs')
-        .send(payload)
-        .expect(201);
-    });
-
-    it('should reject second submission of identical transactionId with HTTP 409 Conflict', async () => {
-      const payload = {
+      firstPayload = {
         transactionId: duplicateTxn,
         kioskId: TEST_KIOSK_ID,
         meterVolume: 88.8,
@@ -319,9 +307,42 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
 
       const res = await request(app.getHttpServer())
         .post('/api/kiosk/logs')
+        .send(firstPayload)
+        .expect(201);
+
+      expect(res.body).toMatchObject({ ack: true, status: 'SYNCHRONIZED', duplicate: false });
+      firstLogId = res.body.logId;
+    });
+
+    it('should re-acknowledge an identical retry with HTTP 200 (duplicate ACK) without a second row', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/kiosk/logs')
+        .send(firstPayload)
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: true,
+        logId: firstLogId,
+        transactionId: duplicateTxn,
+      });
+
+      const count = await prisma.dailyLog.count({
+        where: { transactionId: duplicateTxn },
+      });
+      expect(count).toBe(1);
+    });
+
+    it('should reject the same transactionId with a different reading with HTTP 409 Conflict', async () => {
+      const payload = { ...firstPayload, meterVolume: 99.9 };
+
+      const res = await request(app.getHttpServer())
+        .post('/api/kiosk/logs')
         .send(payload)
         .expect(409);
 
+      expect(res.body).toMatchObject({ ack: false, error: 'DUPLICATE_TRANSACTION' });
       expect(res.body.message).toContain(
         `A log with transactionId "${duplicateTxn}" already exists.`,
       );
