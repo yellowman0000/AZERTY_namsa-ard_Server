@@ -52,6 +52,29 @@ const createInMemoryPrisma = () => {
           return { ...row };
         },
       ),
+      updateMany: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { status?: string; lastHeartbeat?: { lt?: Date } };
+          data: Partial<KioskRow>;
+        }) => {
+          let count = 0;
+          for (const [id, row] of kiosks.entries()) {
+            const statusMatches =
+              !where.status || row.status === where.status;
+            const timeMatches =
+              !where.lastHeartbeat?.lt ||
+              (row.lastHeartbeat && row.lastHeartbeat < where.lastHeartbeat.lt);
+            if (statusMatches && timeMatches) {
+              kiosks.set(id, { ...row, ...data });
+              count++;
+            }
+          }
+          return { count };
+        },
+      ),
     },
   };
 };

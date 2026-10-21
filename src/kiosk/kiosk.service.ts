@@ -1,5 +1,11 @@
 import { PrismaService } from '../prisma.service';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import {
   findMeterConflict,
@@ -19,9 +25,58 @@ import {
 } from './sync-ack';
 
 @Injectable()
-export class KioskService {
+export class KioskService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KioskService.name);
+  private sweepTimer?: NodeJS.Timeout;
+
   constructor(private prisma: PrismaService) {}
+
+  onModuleInit() {
+    // Proactively sweeps kiosks in background every 5s to mark stale kiosks as OFFLINE
+    if (process.env.NODE_ENV !== 'test') {
+      this.sweepTimer = setInterval(() => {
+        this.sweepStaleKiosks().catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.debug(`Background sweep check error: ${msg}`);
+        });
+      }, 5000);
+    }
+  }
+
+  onModuleDestroy() {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = undefined;
+    }
+  }
+
+  /**
+   * Proactively sweeps all kiosks in the database and marks any kiosk whose
+   * heartbeat has ceased for more than 30 seconds as OFFLINE.
+   */
+  async sweepStaleKiosks(): Promise<number> {
+    if (!this.prisma?.kiosk?.updateMany) return 0;
+    const cutoff = new Date(Date.now() - 30 * 1000);
+    const result = await this.prisma.kiosk.updateMany({
+      where: {
+        status: 'ONLINE',
+        lastHeartbeat: {
+          lt: cutoff,
+        },
+      },
+      data: {
+        status: 'OFFLINE',
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(
+        `Background sweeper: marked ${result.count} stale kiosk(s) as OFFLINE in database`,
+      );
+    }
+
+    return result.count;
+  }
 
   // ───────────────────────────────────────────────────────────
   //  Story 02 – Ingest a daily-log / meter-volume reading

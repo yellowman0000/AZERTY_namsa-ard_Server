@@ -5,17 +5,20 @@ import { ValidationPipe } from '@nestjs/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // enable CORS for Next.js (localhost:3000) to make requests
+  const allowedOrigins = process.env.CLIENT_ORIGIN
+    ? process.env.CLIENT_ORIGIN.split(',').map((o) => o.trim())
+    : ['http://localhost:3000'];
+
   app.enableCors({
-    origin: ['http://localhost:3000'],
+    origin: allowedOrigins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
 
-  // เปิดใช้งาน Validation อัตโนมัติ (เผื่อ Wuth ใช้ทำ Payload Validation)
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  await app.listen(3001);
-  console.log(`Kiosk Backend is running on: http://localhost:3001`);
+  const port = Number(process.env.PORT) || 3001;
+  await app.listen(port);
+  console.log(`Kiosk Backend is running on: http://localhost:${port}`);
 }
 void bootstrap();

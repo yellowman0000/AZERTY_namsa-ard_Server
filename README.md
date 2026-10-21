@@ -88,6 +88,8 @@ Responses (Story 14-3 – server ACK confirmation). The kiosk marks a local reco
 | `bun run lint`       | Lint with oxlint             |
 | `bunx prisma studio` | Browse the database in a GUI |
 
+> 📊 **Full Test Results & Sprint 1 Verification Report:** See [`docs/test-results.md`](./docs/test-results.md) for test execution metrics, concurrency load tests, and the live browser demonstration verification guide.
+
 ## End-to-End Offline Sync Testing (Story 14-3)
 
 The test suite in [`test/offline-sync.e2e-spec.ts`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/offline-sync.e2e-spec.ts) verifies offline data accumulation and automatic synchronization under unstable network conditions as required by **Priority 5 — ID 14-3**.

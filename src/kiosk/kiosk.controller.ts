@@ -11,7 +11,7 @@ import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 
-@Controller(['api/kiosk', 'kiosk'])
+@Controller(['api/kiosk', 'kiosk', 'api'])
 export class KioskController {
   constructor(private readonly kioskService: KioskService) {}
 
