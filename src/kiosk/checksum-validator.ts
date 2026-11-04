@@ -1,5 +1,21 @@
 import * as crypto from 'crypto';
 import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  computeReceiptChecksum,
+  generateSignedReceipt,
+  signReceiptChecksum,
+  verifyReceiptSignature,
+  type SignedReceipt,
+  type ReceiptPayloadInput,
+} from './receipt';
+
+export {
+  computeReceiptChecksum,
+  generateSignedReceipt,
+  signReceiptChecksum,
+  verifyReceiptSignature,
+};
+export type { SignedReceipt, ReceiptPayloadInput };
 
 // ───────────────────────────────────────────────────────────
 //  Story 14-2 – Offline Data Corrupted Checker (SCRUM-23)
@@ -16,6 +32,8 @@ export interface ChecksumPayload {
   kioskId: string;
   meterVolume: number;
   recordedAt: string | Date;
+  operatorId?: string;
+  reportedCash?: number;
 }
 
 /**
@@ -83,7 +101,7 @@ export function computePayloadChecksum(
 /**
  * Verifies if the client-provided checksum matches the server-recomputed SHA-256 hash.
  * Supports version-prefixed checksums (e.g. "v1:<hex>", "legacy:<hex>")
- * as well as unprefixed checksums (checking v1 first, then fallback to legacy).
+ * as well as unprefixed checksums (checking v1, legacy, or receipt checksum).
  */
 export function verifyPayloadChecksum(
   payload: ChecksumPayload,
@@ -121,9 +139,23 @@ export function verifyPayloadChecksum(
 
   // Fallback to legacy format (SHA-256(transaction_id + kiosk_id + meter_volume))
   const legacyHash = computePayloadChecksum(payload, 'legacy').toLowerCase();
-  return cleanHash === legacyHash;
+  if (cleanHash === legacyHash) {
+    return true;
+  }
 
+  // Also support receipt format SHA-256(kioskId + operatorId + meterVolume + reportedCash + recordedAt)
+  const receiptHash = computeReceiptChecksum({
+    kioskId: payload.kioskId,
+    operatorId: payload.operatorId,
+    meterVolume: payload.meterVolume,
+    reportedCash: payload.reportedCash,
+    recordedAt: payload.recordedAt,
+  }).toLowerCase();
+  if (cleanHash === receiptHash) {
+    return true;
+  }
 
+  return false;
 }
 
 /**

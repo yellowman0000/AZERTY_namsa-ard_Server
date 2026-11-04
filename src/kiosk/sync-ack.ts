@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import type { IncomingReading } from './meter-conflict';
+import type { SignedReceipt } from './receipt';
 
 // ───────────────────────────────────────────────────────────
 //  Story 14-3 – Server ACK confirmation
@@ -37,15 +38,25 @@ export interface SyncAck {
   logId: string;
   transactionId: string;
   kioskId: string;
+  operatorId?: string;
   meterVolume: number;
+  reportedCash?: number;
   recordedAt: Date;
   /** Server-side timestamp of when the record was first stored. */
   createdAt: Date;
+  /** Signed tamper-evident receipt object upon daily log submission. */
+  receipt?: SignedReceipt;
 }
 
 /** Builds the ACK body for a record that is stored on the server. */
-export function toSyncAck(log: StoredLog, duplicate: boolean): SyncAck {
-  return {
+export function toSyncAck(
+  log: StoredLog,
+  duplicate: boolean,
+  receipt?: SignedReceipt,
+  operatorId?: string,
+  reportedCash?: number,
+): SyncAck {
+  const ack: SyncAck = {
     success: true,
     ack: true,
     status: SYNCHRONIZED,
@@ -57,6 +68,20 @@ export function toSyncAck(log: StoredLog, duplicate: boolean): SyncAck {
     recordedAt: log.recordedAt,
     createdAt: log.createdAt,
   };
+
+  if (operatorId !== undefined) {
+    ack.operatorId = operatorId;
+  }
+
+  if (reportedCash !== undefined) {
+    ack.reportedCash = reportedCash;
+  }
+
+  if (receipt !== undefined) {
+    ack.receipt = receipt;
+  }
+
+  return ack;
 }
 
 /**

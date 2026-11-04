@@ -33,11 +33,13 @@ describe('KioskController', () => {
     expect(controller).toBeDefined();
   });
 
-  describe('POST /logs (ingestLog)', () => {
+  describe('POST /logs and /daily-submission (ingestLog)', () => {
     const dto: IngestLogDto = {
       transactionId: 'TXN-001',
       kioskId: 'KIOSK-001',
+      operatorId: 'OP-100',
       meterVolume: 42.5,
+      reportedCash: 350.0,
       recordedAt: '2026-10-16T10:00:00.000Z',
       checksum: 'abc123',
     };
@@ -50,9 +52,23 @@ describe('KioskController', () => {
       logId: 'uuid-1',
       transactionId: 'TXN-001',
       kioskId: 'KIOSK-001',
+      operatorId: 'OP-100',
       meterVolume: 42.5,
+      reportedCash: 350.0,
       recordedAt: new Date('2026-10-16T10:00:00.000Z'),
       createdAt: new Date(),
+      receipt: {
+        receiptId: 'RCPT-12345',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OP-100',
+        meterVolume: 42.5,
+        reportedCash: 350.0,
+        recordedAt: '2026-10-16T10:00:00.000Z',
+        checksum: 'checksum-hash',
+        signature: 'signature-hex',
+        algorithm: 'SHA-256',
+        issuedAt: new Date().toISOString(),
+      },
     });
 
     const mockResponse = () =>
@@ -60,7 +76,7 @@ describe('KioskController', () => {
         status: jest.Mock;
       };
 
-    it('should call kioskService.ingestLog and return the ACK (default 201)', async () => {
+    it('should call kioskService.ingestLog and return the ACK with signed receipt (default 201)', async () => {
       const expected = ackFor(false);
       service.ingestLog.mockResolvedValue(expected);
       const res = mockResponse();
@@ -68,6 +84,8 @@ describe('KioskController', () => {
       const result = await controller.ingestLog(dto, res);
 
       expect(result).toEqual(expected);
+      expect(result.receipt).toBeDefined();
+      expect(result.receipt!.checksum).toBe('checksum-hash');
       expect(service.ingestLog).toHaveBeenCalledWith(dto);
       expect(res.status).not.toHaveBeenCalled();
     });

@@ -8,6 +8,7 @@ import { KioskService } from './kiosk.service';
 import { PrismaService } from '../prisma.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import { computePayloadChecksum } from './checksum-validator';
+import { computeReceiptChecksum, verifyReceiptSignature } from './receipt';
 
 describe('KioskService', () => {
   let service: KioskService;
@@ -67,7 +68,7 @@ describe('KioskService', () => {
       checksum: validChecksum,
     };
 
-    it('should create a log and return success with server timestamp', async () => {
+    it('should create a log and return success with server timestamp and signed receipt', async () => {
       const now = new Date();
       prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
       prisma.dailyLog.findUnique.mockResolvedValue(null);
@@ -95,6 +96,7 @@ describe('KioskService', () => {
         meterVolume: 42.5,
         recordedAt: new Date('2026-10-16T10:00:00.000Z'),
         createdAt: now, // server-side timestamp
+        receipt: expect.any(Object),
       });
 
       expect(prisma.dailyLog.create).toHaveBeenCalledWith({
@@ -106,6 +108,63 @@ describe('KioskService', () => {
           checksum: validChecksum,
         },
       });
+    });
+
+    it('should accept operatorId and reportedCash, compute server-side SHA-256 and return signed receipt', async () => {
+      const now = new Date();
+      const dtoWithOperator: IngestLogDto = {
+        transactionId: 'TXN-OP-001',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OPERATOR-99',
+        meterVolume: 75.25,
+        reportedCash: 1250.0,
+        recordedAt: '2026-10-16T12:00:00.000Z',
+      };
+
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      prisma.dailyLog.create.mockResolvedValue({
+        id: 'uuid-op-1',
+        transactionId: dtoWithOperator.transactionId,
+        kioskId: dtoWithOperator.kioskId,
+        meterVolume: dtoWithOperator.meterVolume,
+        recordedAt: new Date(dtoWithOperator.recordedAt),
+        createdAt: now,
+        checksum: null,
+        isSynced: true,
+      });
+
+      const result = await service.ingestLog(dtoWithOperator);
+
+      expect(result.success).toBe(true);
+      expect(result.operatorId).toBe('OPERATOR-99');
+      expect(result.reportedCash).toBe(1250.0);
+      expect(result.receipt).toBeDefined();
+
+      const expectedChecksum = computeReceiptChecksum({
+        kioskId: 'KIOSK-001',
+        operatorId: 'OPERATOR-99',
+        meterVolume: 75.25,
+        reportedCash: 1250.0,
+        recordedAt: '2026-10-16T12:00:00.000Z',
+      });
+
+      expect(result.receipt!.checksum).toBe(expectedChecksum);
+      expect(result.receipt!.hash).toBe(expectedChecksum);
+      expect(result.receipt!.operatorId).toBe('OPERATOR-99');
+      expect(result.receipt!.reportedCash).toBe(1250.0);
+      expect(result.receipt!.meterVolume).toBe(75.25);
+      expect(result.receipt!.kioskId).toBe('KIOSK-001');
+      expect(result.receipt!.algorithm).toBe('SHA-256');
+      expect(result.receipt!.signature).toMatch(/^[0-9a-f]{64}$/);
+
+      // Verify cryptographic signature
+      expect(
+        verifyReceiptSignature(
+          result.receipt!.checksum,
+          result.receipt!.signature,
+        ),
+      ).toBe(true);
     });
 
     it('should set checksum to null when not provided', async () => {
@@ -257,6 +316,7 @@ describe('KioskService', () => {
         meterVolume: 42.5,
         recordedAt: storedLog.recordedAt,
         createdAt: storedLog.createdAt, // time of the first, successful upload
+        receipt: expect.any(Object),
       });
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
       expect(prisma.dailyLog.findFirst).not.toHaveBeenCalled();

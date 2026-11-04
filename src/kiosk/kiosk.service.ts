@@ -23,6 +23,7 @@ import {
   StoredLog,
   SyncAck,
 } from './sync-ack';
+import { generateSignedReceipt } from './receipt';
 
 @Injectable()
 export class KioskService implements OnModuleInit, OnModuleDestroy {
@@ -86,6 +87,8 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
    * Persist a meter-volume reading sent by a kiosk.
    *
    * - Recomputes and verifies SHA-256 hash against `checksum` (Story 14-2).
+   * - Accepts `operatorId` and `reportedCash`.
+   * - Generates server-side SHA-256(kioskId + operatorId + meterVolume + reportedCash + recordedAt).
    * - Validates that the referenced kiosk exists.
    * - Idempotency: an identical retry of a stored `transactionId` is
    *   acknowledged again instead of inserted twice; a different reading
@@ -94,8 +97,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
    *   (Story 14-2, see `meter-conflict.ts`).
    * - Generates the server-side `createdAt` timestamp automatically
    *   via Prisma's `@default(now())`.
-   * - Returns an explicit ACK (`ack: true, status: "SYNCHRONIZED"`) so the
-   *   kiosk knows it may mark its local record as synchronized.
+   * - Returns an explicit ACK (`ack: true, status: "SYNCHRONIZED"`) and a signed receipt object.
    */
   async ingestLog(dto: IngestLogDto): Promise<SyncAck> {
     // 1. Story 14-2 – Verify SHA-256 checksum if provided
@@ -106,6 +108,8 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
           kioskId: dto.kioskId,
           meterVolume: dto.meterVolume,
           recordedAt: dto.recordedAt,
+          operatorId: dto.operatorId,
+          reportedCash: dto.reportedCash,
         },
         dto.checksum,
       );
@@ -143,7 +147,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (existing) {
-      return this.acknowledgeExisting(existing, incoming);
+      return this.acknowledgeExisting(existing, incoming, dto);
     }
 
     // 4. Story 14-2 – reject readings that conflict with server state
@@ -172,7 +176,16 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
         `Ingested log ${log.id} for kiosk ${log.kioskId} (txn: ${log.transactionId})`,
       );
 
-      return toSyncAck(log, false);
+      const receipt = generateSignedReceipt({
+        kioskId: dto.kioskId,
+        operatorId: dto.operatorId,
+        meterVolume: dto.meterVolume,
+        reportedCash: dto.reportedCash,
+        recordedAt: dto.recordedAt,
+        transactionId: dto.transactionId,
+      });
+
+      return toSyncAck(log, false, receipt, dto.operatorId, dto.reportedCash);
     } catch (err: unknown) {
       if (
         typeof err === 'object' &&
@@ -184,7 +197,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
         const winner = await this.prisma.dailyLog.findUnique({
           where: { transactionId: dto.transactionId },
         });
-        if (winner) return this.acknowledgeExisting(winner, incoming);
+        if (winner) return this.acknowledgeExisting(winner, incoming, dto);
         throw toDuplicateTransactionException(dto.transactionId);
       }
       throw err;
@@ -198,6 +211,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
   private acknowledgeExisting(
     existing: StoredLog,
     incoming: IncomingReading,
+    dto?: IngestLogDto,
   ): SyncAck {
     if (!isSameReading(existing, incoming)) {
       this.logger.warn(
@@ -209,7 +223,17 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `Re-acknowledged log ${existing.id} for kiosk ${existing.kioskId} (txn: ${existing.transactionId})`,
     );
-    return toSyncAck(existing, true);
+
+    const receipt = generateSignedReceipt({
+      kioskId: existing.kioskId,
+      operatorId: dto?.operatorId,
+      meterVolume: existing.meterVolume,
+      reportedCash: dto?.reportedCash,
+      recordedAt: existing.recordedAt,
+      transactionId: existing.transactionId,
+    });
+
+    return toSyncAck(existing, true, receipt, dto?.operatorId, dto?.reportedCash);
   }
 
   // ───────────────────────────────────────────────────────────

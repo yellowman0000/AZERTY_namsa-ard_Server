@@ -5,6 +5,7 @@ import {
   IsPositive,
   IsDateString,
   IsOptional,
+  Min,
 } from 'class-validator';
 
 /**
@@ -23,10 +24,21 @@ export class IngestLogDto {
   @IsNotEmpty({ message: 'kioskId is required' })
   kioskId!: string;
 
+  /** Optional ID of the operator who collected/submitted the daily log. */
+  @IsOptional()
+  @IsString({ message: 'operatorId must be a string' })
+  operatorId?: string;
+
   /** Meter volume reading – must be a positive number. */
   @IsNumber({}, { message: 'meterVolume must be a number' })
   @IsPositive({ message: 'meterVolume must be positive' })
   meterVolume!: number;
+
+  /** Optional reported cash collected during the shift/day. */
+  @IsOptional()
+  @IsNumber({}, { message: 'reportedCash must be a number' })
+  @Min(0, { message: 'reportedCash must be non-negative' })
+  reportedCash?: number;
 
   /** ISO-8601 timestamp of when the reading was recorded on the kiosk. */
   @IsDateString({}, { message: 'recordedAt must be a valid ISO-8601 date string' })

@@ -34,41 +34,48 @@ Server runs on `http://localhost:3001` by default.
 
 ## Environment variables
 
-| Variable        | Default                 | Description                                   |
-| --------------- | ----------------------- | --------------------------------------------- |
-| `PORT`          | `3001`                  | HTTP port                                     |
-| `DATABASE_URL`  | —                       | PostgreSQL connection string (see `.env.example`) |
-| `CLIENT_ORIGIN` | `http://localhost:3000` | Allowed CORS origin(s), comma-separated       |
+| Variable              | Default                               | Description                                   |
+| --------------------- | ------------------------------------- | --------------------------------------------- |
+| `PORT`                | `3001`                                | HTTP port                                     |
+| `DATABASE_URL`        | —                                     | PostgreSQL connection string (see `.env.example`) |
+| `CLIENT_ORIGIN`       | `http://localhost:3000`               | Allowed CORS origin(s), comma-separated       |
+| `RECEIPT_SIGNING_KEY` | `namsa-ard-kiosk-receipt-secret-key`  | HMAC-SHA256 secret for signed receipts        |
 
 ## API
 
-All routes are also available under the legacy `/kiosk/*` alias.
+All routes are also available under the legacy `/kiosk/*` alias and direct root aliases.
 
-| Method | Path                     | Description                                   |
-| ------ | ------------------------ | --------------------------------------------- |
-| POST   | `/api/kiosk/heartbeat`   | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
-| GET    | `/api/kiosk/status/:id`  | Get kiosk status (`ONLINE` / `OFFLINE`)       |
-| POST   | `/api/kiosk/logs`        | Ingest daily meter log — answers with a server ACK (see below) |
+| Method | Path                                                  | Description                                   |
+| ------ | ----------------------------------------------------- | --------------------------------------------- |
+| POST   | `/api/kiosk/heartbeat`                                | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
+| GET    | `/api/kiosk/status/:id`                               | Get kiosk status (`ONLINE` / `OFFLINE`)       |
+| POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
 
-`POST /api/kiosk/logs` body:
+`POST /api/kiosk/logs` (or `/daily-submission`) body:
 
 ```json
 {
   "transactionId": "TX-0001",
   "kioskId": "KIOSK-001",
+  "operatorId": "OP-001",
   "meterVolume": 12.5,
+  "reportedCash": 250.0,
   "recordedAt": "2026-10-18T09:00:00.000Z",
   "checksum": "optional-sha256"
 }
 ```
+
+Receipt payload computed on the server:
+- **Checksum:** `SHA-256(kioskId + operatorId + meterVolume + reportedCash + recordedAt)`
+- **Signature:** `HMAC-SHA256(checksum, RECEIPT_SIGNING_KEY)`
 
 Responses (Story 14-3 – server ACK confirmation). The kiosk marks a local record
 **Synchronized** only on a 200/201 whose body has `"ack": true` for that `transactionId`:
 
 | Status | When | Body |
 | ------ | ---- | ---- |
-| `201`  | New record stored | `{ "ack": true, "status": "SYNCHRONIZED", "duplicate": false, "logId", "transactionId", "createdAt", … }` |
-| `200`  | Identical retry of a stored record (e.g. its first ACK was lost) | same ACK, `"duplicate": true` |
+| `201`  | New record stored | `{ "ack": true, "status": "SYNCHRONIZED", "duplicate": false, "logId", "transactionId", "receipt": { "receiptId", "checksum", "signature", … }, … }` |
+| `200`  | Identical retry of a stored record (e.g. its first ACK was lost) | same ACK and receipt, `"duplicate": true` |
 | `409`  | `transactionId` already stored with a different reading | `{ "ack": false, "error": "DUPLICATE_TRANSACTION" }` |
 | `409`  | Reading conflicts with newer/older server state | `{ "ack": false, "error": "STATE_CONFLICT" }` |
 | `422`  | Checksum mismatch | `{ "ack": false, "error": "CORRUPTED_PAYLOAD" }` |
@@ -92,11 +99,11 @@ Responses (Story 14-3 – server ACK confirmation). The kiosk marks a local reco
 
 ## End-to-End Offline Sync Testing (Story 14-3)
 
-The test suite in [`test/offline-sync.e2e-spec.ts`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/offline-sync.e2e-spec.ts) verifies offline data accumulation and automatic synchronization under unstable network conditions as required by **Priority 5 — ID 14-3**.
+The test suite in [`test/offline-sync.e2e-spec.ts`](test/offline-sync.e2e-spec.ts) verifies offline data accumulation and automatic synchronization under unstable network conditions as required by **Priority 5 — ID 14-3**.
 
 ### Architecture Under Test
 
-A fault-injecting proxy ([`NetworkSimulator`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/support/network-simulator.ts)) sits between the kiosk client ([`KioskSimulator`](file:///home/project/Coding/AZERTY_namsa-ard/AZERTY_namsa-ard_Server/test/support/kiosk-simulator.ts)) and the real NestJS API server backed by PostgreSQL:
+A fault-injecting proxy ([`NetworkSimulator`](test/support/network-simulator.ts)) sits between the kiosk client ([`KioskSimulator`](test/support/kiosk-simulator.ts)) and the real NestJS API server backed by PostgreSQL:
 
 ```text
 KioskSimulator (14-1 Queue + 14-2 Checksum)

@@ -11,19 +11,20 @@ import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 
-@Controller(['api/kiosk', 'kiosk', 'api'])
+@Controller(['api/kiosk', 'kiosk', 'api', ''])
 export class KioskController {
   constructor(private readonly kioskService: KioskService) {}
 
   // ───────────────────────────────────────────────────────────
   //  Story 02 – Ingest daily-log / meter-volume
-  //  POST /api/kiosk/logs
+  //  POST /api/kiosk/logs (or /daily-submission)
   //
   //  Story 14-3 – answers with a server ACK (see `sync-ack.ts`):
   //  201 for a new record, 200 when re-acknowledging a stored one.
+  //  Returns tamper-evident signed receipt with SHA-256 checksum.
   // ───────────────────────────────────────────────────────────
 
-  @Post('logs')
+  @Post(['logs', 'daily-submission'])
   async ingestLog(
     @Body() dto: IngestLogDto,
     @Res({ passthrough: true }) res: Response,
@@ -36,7 +37,6 @@ export class KioskController {
   // ───────────────────────────────────────────────────────────
   //  Existing endpoints
   // ───────────────────────────────────────────────────────────
-
 
   // POST http://localhost:3001/api/kiosk/heartbeat
   // for Ball to send Heartbeat to Server
