@@ -45,6 +45,10 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# Google service account keys (Story 03)
+*service-account*.json
+google-credentials*.json
+
 # temp directory
 .temp
 .tmp
