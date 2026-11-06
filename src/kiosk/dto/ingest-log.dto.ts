@@ -7,14 +7,19 @@ import {
   IsOptional,
   IsBoolean,
   IsIn,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export const WATER_TYPES = ['COMMERCIAL', 'SUBSIDIZED'] as const;
 export type WaterTypeDto = (typeof WATER_TYPES)[number];
 export const READING_TYPES = ['CUMULATIVE_METER', 'DAILY_VOLUME'] as const;
 export type ReadingTypeDto = (typeof READING_TYPES)[number];
+
+/** Canonical operator identifier, e.g. OP-001 (three digits, as in the spec). */
+export const OPERATOR_ID_PATTERN = /^OP-\d{3}$/;
 
 /**
  * DTO for ingesting a daily log / meter-volume reading from a kiosk.
@@ -34,7 +39,13 @@ export class IngestLogDto {
 
   /** Optional ID of the operator who collected/submitted the daily log (Story 05). */
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
   @IsString({ message: 'operatorId must be a string' })
+  @Matches(OPERATOR_ID_PATTERN, {
+    message: 'operatorId must look like OP-001',
+  })
   operatorId?: string;
 
   /** Meter volume reading – must be a positive number. */

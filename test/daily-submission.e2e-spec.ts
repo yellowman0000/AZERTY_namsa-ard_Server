@@ -78,7 +78,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       .send({
         transactionId: 'TXN-DAILY-VOLUME-001',
         kioskId: 'KIOSK-001',
-        operatorId: 'OPERATOR-77',
+        operatorId: 'OP-077',
         readingType: 'DAILY_VOLUME',
         meterVolume: 12.5,
         reportedCash: 20,
@@ -117,7 +117,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       .send({
         transactionId: 'TXN-EVIDENCE-001',
         kioskId: 'KIOSK-001',
-        operatorId: 'OPERATOR-77',
+        operatorId: 'OP-077',
         readingType: 'DAILY_VOLUME',
         meterVolume: 12.5,
         reportedCash: 20,
@@ -141,7 +141,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       .send({
         transactionId: 'TXN-EVIDENCE-002',
         kioskId: 'KIOSK-001',
-        operatorId: 'OPERATOR-77',
+        operatorId: 'OP-077',
         readingType: 'DAILY_VOLUME',
         meterVolume: 10,
         recordedAt: '2026-11-04T10:05:00.000Z',
@@ -151,12 +151,49 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       .expect(400);
   });
 
+  it('normalizes a lowercase operatorId and rejects a malformed one', async () => {
+    const accepted = await request(app.getHttpServer())
+      .post('/api/kiosk/logs')
+      .send({
+        transactionId: 'TXN-OPERATOR-FORMAT-1',
+        kioskId: 'KIOSK-001',
+        operatorId: 'op-042',
+        readingType: 'DAILY_VOLUME',
+        meterVolume: 10,
+        reportedCash: 20,
+        recordedAt: '2026-11-04T11:00:00.000Z',
+      })
+      .expect(201);
+
+    expect(accepted.body.receipt.operatorId).toBe('OP-042');
+    expect(mockPrisma.dailyLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ operatorId: 'OP-042' }),
+      }),
+    );
+
+    for (const operatorId of ['OP-42', '042', 'OP-0042', 'OPERATOR-1']) {
+      await request(app.getHttpServer())
+        .post('/api/kiosk/logs')
+        .send({
+          transactionId: `TXN-OPERATOR-FORMAT-${operatorId}`,
+          kioskId: 'KIOSK-001',
+          operatorId,
+          readingType: 'DAILY_VOLUME',
+          meterVolume: 10,
+          reportedCash: 20,
+          recordedAt: '2026-11-04T11:01:00.000Z',
+        })
+        .expect(400);
+    }
+  });
+
   describe('POST /api/kiosk/logs with operatorId & reportedCash', () => {
     it('accepts operatorId and reportedCash, returning signed receipt with SHA-256 checksum', async () => {
       const payload = {
         transactionId: 'TXN-DAILY-001',
         kioskId: 'KIOSK-001',
-        operatorId: 'OPERATOR-77',
+        operatorId: 'OP-077',
         meterVolume: 150.75,
         reportedCash: 2450.0,
         recordedAt: '2026-11-04T10:00:00.000Z',
@@ -178,13 +215,13 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.ack).toBe(true);
       expect(res.body.status).toBe('SYNCHRONIZED');
-      expect(res.body.operatorId).toBe('OPERATOR-77');
+      expect(res.body.operatorId).toBe('OP-077');
       expect(res.body.reportedCash).toBe(2450.0);
       expect(res.body.receipt).toBeDefined();
 
       const receipt = res.body.receipt;
       expect(receipt.kioskId).toBe('KIOSK-001');
-      expect(receipt.operatorId).toBe('OPERATOR-77');
+      expect(receipt.operatorId).toBe('OP-077');
       expect(receipt.meterVolume).toBe(150.75);
       expect(receipt.reportedCash).toBe(2450.0);
       expect(receipt.recordedAt).toBe('2026-11-04T10:00:00.000Z');
@@ -200,7 +237,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       const payload = {
         transactionId: 'TXN-DAILY-ERR-001',
         kioskId: 'KIOSK-001',
-        operatorId: 'OPERATOR-77',
+        operatorId: 'OP-077',
         meterVolume: 150.75,
         reportedCash: -100,
         recordedAt: '2026-11-04T10:00:00.000Z',
@@ -220,7 +257,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       const payload = {
         transactionId: 'TXN-DAILY-SUB-001',
         kioskId: 'KIOSK-001',
-        operatorId: 'OP-ALIAS-01',
+        operatorId: 'OP-001',
         meterVolume: 88.0,
         reportedCash: 500,
         recordedAt: '2026-11-04T11:00:00.000Z',
@@ -233,7 +270,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
 
       expect(res.body.success).toBe(true);
       expect(res.body.receipt).toBeDefined();
-      expect(res.body.receipt.operatorId).toBe('OP-ALIAS-01');
+      expect(res.body.receipt.operatorId).toBe('OP-001');
       expect(res.body.receipt.reportedCash).toBe(500);
       expect(verifyReceiptSignature(res.body.receipt.checksum, res.body.receipt.signature)).toBe(true);
     });
@@ -244,7 +281,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       const payload = {
         transactionId: 'TXN-DAILY-SUB-002',
         kioskId: 'KIOSK-001',
-        operatorId: 'OP-DIRECT-01',
+        operatorId: 'OP-002',
         meterVolume: 92.5,
         reportedCash: 1000,
         recordedAt: '2026-11-04T11:30:00.000Z',
@@ -257,7 +294,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
 
       expect(res.body.success).toBe(true);
       expect(res.body.receipt).toBeDefined();
-      expect(res.body.receipt.operatorId).toBe('OP-DIRECT-01');
+      expect(res.body.receipt.operatorId).toBe('OP-002');
       expect(res.body.receipt.reportedCash).toBe(1000);
       expect(verifyReceiptSignature(res.body.receipt.checksum, res.body.receipt.signature)).toBe(true);
     });

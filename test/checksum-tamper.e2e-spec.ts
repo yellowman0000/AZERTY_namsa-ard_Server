@@ -121,7 +121,7 @@ interface DailyLogPayload {
 const ORIGINAL: Omit<DailyLogPayload, 'checksum'> = {
   transactionId: 'TXN-PROOF-001',
   kioskId: KIOSK_ID,
-  operatorId: 'OP-FIELD-07',
+  operatorId: 'OP-007',
   meterVolume: 150.75,
   reportedCash: 2450,
   recordedAt: '2026-11-04T10:00:00.000Z',
@@ -278,7 +278,7 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
     it.each<[string, Partial<DailyLogPayload>]>([
       ['reportedCash changed', { reportedCash: 245 }],
       ['reportedCash set to zero', { reportedCash: 0 }],
-      ['operatorId swapped', { operatorId: 'OP-FIELD-99' }],
+      ['operatorId swapped', { operatorId: 'OP-099' }],
       ['meterVolume inflated', { meterVolume: 1500.75 }],
     ])('rejects a receipt-checksummed entry with %s (422 CORRUPTED_PAYLOAD, nothing stored)', async (_label, change) => {
       const checksum = receiptChecksumOf(ORIGINAL);
@@ -419,7 +419,7 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
     it.each<[string, Partial<SignedReceipt>]>([
       ['meterVolume', { meterVolume: 1500.75 }],
       ['reportedCash', { reportedCash: 245 }],
-      ['operatorId', { operatorId: 'OP-FIELD-99' }],
+      ['operatorId', { operatorId: 'OP-099' }],
       ['kioskId', { kioskId: 'KIOSK-PROOF-002' }],
       ['recordedAt', { recordedAt: '2026-11-03T10:00:00.000Z' }],
     ])('detects a receipt with a modified %s (CHECKSUM_MISMATCH)', async (_label, change) => {

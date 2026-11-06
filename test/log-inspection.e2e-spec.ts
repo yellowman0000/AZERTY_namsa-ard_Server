@@ -150,7 +150,7 @@ const KIOSK_ID = 'KIOSK-HIST-001';
 const READING = {
   transactionId: 'TXN-HIST-001',
   kioskId: KIOSK_ID,
-  operatorId: 'OP-FIELD-07',
+  operatorId: 'OP-007',
   meterVolume: 150.75,
   reportedCash: 2450,
   recordedAt: '2026-11-04T10:00:00.000Z',

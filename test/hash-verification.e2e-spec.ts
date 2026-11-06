@@ -163,7 +163,7 @@ interface Submission {
 const SUBMISSION: Submission = {
   transactionId: 'TXN-HASH-001',
   kioskId: KIOSK_ID,
-  operatorId: 'OP-FIELD-07',
+  operatorId: 'OP-007',
   meterVolume: 150.75,
   reportedCash: 2450,
   recordedAt: '2026-11-04T10:00:00.000Z',
@@ -406,7 +406,7 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
     it.each<[string, (row: FakeLog) => void]>([
       ['reportedCash lowered', (row) => (row.reportedCash = 245)],
       ['reportedCash set to 0', (row) => (row.reportedCash = 0)],
-      ['operatorId reassigned', (row) => (row.operatorId = 'OP-FIELD-99')],
+      ['operatorId reassigned', (row) => (row.operatorId = 'OP-099')],
       ['operatorId cleared', (row) => (row.operatorId = null)],
       ['meterVolume inflated', (row) => (row.meterVolume = 1500.75)],
     ])(
