@@ -1,5 +1,3 @@
-import * as crypto from 'crypto';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import {
   Injectable,
@@ -8,8 +6,11 @@ import {
   NotFoundException,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
   PayloadTooLargeException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ImgbbService, EvidenceStorageUnavailableError } from './imgbb.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import {
   findMeterConflict,
@@ -65,22 +66,29 @@ export interface EvidenceUploadFile {
   originalname: string;
 }
 
-interface EvidencePhotoRecord {
-  fileName: string;
-  mimeType: string;
-  image: Uint8Array;
+/**
+ * Proof photos are hosted by imgBB, so the persisted URL points at their CDN.
+ * Only https URLs on imgBB's own hosts are accepted to stop arbitrary hosts
+ * being stored as "evidence".
+ */
+const IMGBB_IMAGE_HOSTS = new Set(['i.ibb.co', 'ibb.co']);
+
+export function isImgbbImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      IMGBB_IMAGE_HOSTS.has(url.hostname.toLowerCase()) &&
+      url.pathname.replace(/^\/+/, '').length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
-function isProofImageUrlForTransaction(
-  proofImageUrl: string,
-  transactionId: string,
-): boolean {
-  const fileName = proofImageUrl.split('/').at(-1);
-  return (
-    proofImageUrl ===
-      `/api/kiosk/logs/${encodeURIComponent(transactionId)}/evidence/${fileName}` &&
-    /^[a-f\d]{64}\.(jpg|png|webp)$/i.test(fileName ?? '')
-  );
+/** `proofImageUrl` must be a URL the evidence upload route could have produced. */
+export function isAcceptableProofImageUrl(proofImageUrl: string): boolean {
+  return isImgbbImageUrl(proofImageUrl);
 }
 
 @Injectable()
@@ -88,8 +96,16 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KioskService.name);
   private sweepTimer?: NodeJS.Timeout;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private readonly imgbb: ImgbbService = new ImgbbService(),
+  ) {}
 
+  /**
+   * Validates the photo, hands the bytes to imgBB, and returns the public URL
+   * that the operator client stores on the submission as `proofImageUrl`.
+   * Nothing is written to PostgreSQL here.
+   */
   async uploadEvidence(
     transactionId: string,
     file: EvidenceUploadFile,
@@ -112,53 +128,25 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const imageHash = crypto
-      .createHash('sha256')
-      .update(file.buffer)
-      .digest('hex');
-    const fileName = `${imageHash}.${imageType.extension}`;
-    await this.prisma.$executeRaw(Prisma.sql`
-      INSERT INTO "evidence_photos"
-        ("transaction_id", "file_name", "mime_type", "image")
-      VALUES
-        (${transactionId}, ${fileName}, ${file.mimetype}, ${file.buffer})
-      ON CONFLICT ("transaction_id") DO UPDATE SET
-        "file_name" = EXCLUDED."file_name",
-        "mime_type" = EXCLUDED."mime_type",
-        "image" = EXCLUDED."image"
-    `);
-
-    return {
-      proofImageUrl: `/api/kiosk/logs/${encodeURIComponent(transactionId)}/evidence/${fileName}`,
-    };
-  }
-
-  async getEvidence(
-    transactionId: string,
-    fileName: string,
-  ): Promise<{ buffer: Buffer; mimetype: string }> {
-    if (
-      !/^[A-Za-z0-9_-]{1,128}$/.test(transactionId) ||
-      !/^[a-f\d]{64}\.(jpg|png|webp)$/i.test(fileName)
-    ) {
-      throw new NotFoundException('Evidence image not found.');
+    if (!this.imgbb.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Evidence storage is not configured on the server.',
+      );
     }
 
-    const [evidence] = await this.prisma.$queryRaw<EvidencePhotoRecord[]>(
-      Prisma.sql`
-        SELECT "file_name" AS "fileName", "mime_type" AS "mimeType", "image"
-        FROM "evidence_photos"
-        WHERE "transaction_id" = ${transactionId}
-        LIMIT 1
-      `,
-    );
-    if (!evidence || evidence.fileName !== fileName) {
-      throw new NotFoundException('Evidence image not found.');
+    try {
+      const uploaded = await this.imgbb.upload(
+        file.buffer,
+        `kiosk-${transactionId}.${imageType.extension}`,
+        file.mimetype,
+      );
+      return { proofImageUrl: uploaded.url };
+    } catch (error) {
+      if (error instanceof EvidenceStorageUnavailableError) {
+        throw new ServiceUnavailableException(error.message);
+      }
+      throw error;
     }
-    return {
-      buffer: Buffer.from(evidence.image),
-      mimetype: evidence.mimeType,
-    };
   }
 
   onModuleInit() {
@@ -297,13 +285,10 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
 
     if (
       dto.proofImageUrl &&
-      !isProofImageUrlForTransaction(
-        dto.proofImageUrl,
-        dto.transactionId,
-      )
+      !isAcceptableProofImageUrl(dto.proofImageUrl)
     ) {
       throw new BadRequestException(
-        'proofImageUrl must reference an uploaded image for this transaction.',
+        'proofImageUrl must be an imgBB image URL returned by the evidence upload endpoint.',
       );
     }
 

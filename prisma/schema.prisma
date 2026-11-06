@@ -51,13 +51,3 @@ model DailyLog {
   @@index([kioskId, recordedAt(sort: Desc)])
   @@map("daily_logs")
 }
-
-model EvidencePhoto {
-  transactionId String   @id @map("transaction_id")
-  fileName      String   @map("file_name")
-  mimeType      String   @map("mime_type")
-  image         Bytes    @db.ByteA
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  @@map("evidence_photos")
-}

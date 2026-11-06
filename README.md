@@ -50,8 +50,7 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | POST   | `/api/kiosk/heartbeat`                                | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
 | GET    | `/api/kiosk/status/:id`                               | Get kiosk status (`ONLINE` / `OFFLINE`)       |
 | POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
-| POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB); returns `proofImageUrl` |
-| GET    | `/api/kiosk/logs/:transactionId/evidence/:fileName`   | Retrieve an uploaded evidence photo through the server |
+| POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB) to imgBB; returns `proofImageUrl` |
 | GET    | `/api/kiosk/logs?kioskId=&cursor=&limit=`             | Read-only log history, newest first — `{ "data": [...], "nextCursor": "<logId>" \| null }` (`limit` 1–100, default 20) |
 | GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
 
@@ -79,18 +78,21 @@ The response also carries `storedChecksum`, `recomputedChecksum`, the matched
   "reportedCash": 250.0,
   "readingType": "DAILY_VOLUME",
   "recordedAt": "2026-10-18T09:00:00.000Z",
-  "proofImageUrl": "/api/kiosk/logs/TX-0001/evidence/<sha256>.jpg",
+  "proofImageUrl": "https://i.ibb.co/abcd1234/meter.jpg",
   "checksum": "optional-sha256"
 }
 ```
 
 `readingType` accepts `DAILY_VOLUME` (may change independently each day) and
 `CUMULATIVE_METER` (must remain monotonic). Omitted values default to
-`CUMULATIVE_METER` for older clients. Evidence uploads are stored as bytes in
-the PostgreSQL `evidence_photos` table, using the same `DATABASE_URL` as the
-rest of the server. After pulling this change, sync the database schema with
-`bunx prisma db push` before starting the server. Images are limited to 5 MB
-and served through the API using the stable URL stored in `proofImageUrl`.
+`CUMULATIVE_METER` for older clients.
+
+Evidence photos are hosted by [imgBB](https://api.imgbb.com/). The upload route
+validates the image (JPEG, PNG, or WebP, 5 MB max), forwards the bytes to imgBB
+using `IMGBB_API_KEY`, and returns the public CDN URL as `proofImageUrl`; only
+that URL is stored in the designed `DailyLog.proofImageUrl` column. Photos never
+enter PostgreSQL, so no schema push is required. When `IMGBB_API_KEY` is empty
+the upload route answers `503` and the operator client keeps the entry queued.
 
 Receipt payload computed on the server:
 - **Checksum:** `SHA-256(kioskId + operatorId + meterVolume + reportedCash + recordedAt)`

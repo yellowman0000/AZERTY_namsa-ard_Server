@@ -3,10 +3,16 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
+import { ImgbbService } from '../src/kiosk/imgbb.service';
 import { computeReceiptChecksum, verifyReceiptSignature } from '../src/kiosk/receipt';
 
 describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
   let app: INestApplication;
+  const imgbbImageUrl = 'https://i.ibb.co/abcd1234/meter.jpg';
+  const mockImgbb = {
+    isConfigured: jest.fn().mockReturnValue(true),
+    upload: jest.fn(),
+  };
   const mockPrisma = {
     kiosk: {
       findUnique: jest.fn(),
@@ -28,6 +34,8 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(mockPrisma)
+      .overrideProvider(ImgbbService)
+      .useValue(mockImgbb)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -41,6 +49,11 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockImgbb.isConfigured.mockReturnValue(true);
+    mockImgbb.upload.mockResolvedValue({
+      url: imgbbImageUrl,
+      displayUrl: 'https://ibb.co/abcd1234',
+    });
     mockPrisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
     mockPrisma.dailyLog.findUnique.mockResolvedValue(null);
     mockPrisma.dailyLog.findFirst.mockResolvedValue(null);
@@ -86,7 +99,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
     );
   });
 
-  it('uploads evidence to PostgreSQL, persists its proofImageUrl, and serves the image', async () => {
+  it('uploads evidence to imgBB and persists its public URL with the log', async () => {
     const image = Buffer.from([0xff, 0xd8, 0xff]);
     const upload = await request(app.getHttpServer())
       .post('/api/kiosk/logs/TXN-EVIDENCE-001/evidence')
@@ -96,10 +109,8 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       })
       .expect(201);
 
-    const proofImageUrl = upload.body.proofImageUrl as string;
-    expect(proofImageUrl).toMatch(
-      /^\/api\/kiosk\/logs\/TXN-EVIDENCE-001\/evidence\/[a-f\d]{64}\.jpg$/,
-    );
+    expect(upload.body.proofImageUrl).toBe(imgbbImageUrl);
+    expect(mockImgbb.upload).toHaveBeenCalledTimes(1);
 
     const logResponse = await request(app.getHttpServer())
       .post('/api/kiosk/logs')
@@ -110,30 +121,34 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
         readingType: 'DAILY_VOLUME',
         meterVolume: 12.5,
         reportedCash: 20,
-        proofImageUrl,
+        proofImageUrl: imgbbImageUrl,
         recordedAt: '2026-11-04T10:00:00.000Z',
       })
       .expect(201);
 
-    expect(logResponse.body.proofImageUrl).toBe(proofImageUrl);
+    expect(logResponse.body.proofImageUrl).toBe(imgbbImageUrl);
     expect(mockPrisma.dailyLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ proofImageUrl }),
+        data: expect.objectContaining({ proofImageUrl: imgbbImageUrl }),
       }),
     );
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+  });
 
-    const fileName = proofImageUrl.split('/').at(-1)!;
-    mockPrisma.$queryRaw.mockResolvedValue([{
-      fileName,
-      mimeType: 'image/jpeg',
-      image,
-    }]);
-    const imageResponse = await request(app.getHttpServer())
-      .get(proofImageUrl)
-      .expect(200)
-      .expect('Content-Type', 'image/jpeg');
-    expect(imageResponse.body).toEqual(image);
+  it('rejects a proofImageUrl that is not hosted by imgBB', async () => {
+    await request(app.getHttpServer())
+      .post('/api/kiosk/logs')
+      .send({
+        transactionId: 'TXN-EVIDENCE-002',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OPERATOR-77',
+        readingType: 'DAILY_VOLUME',
+        meterVolume: 10,
+        recordedAt: '2026-11-04T10:05:00.000Z',
+        reportedCash: 20,
+        proofImageUrl: 'https://evil.example.com/meter.jpg',
+      })
+      .expect(400);
   });
 
   describe('POST /api/kiosk/logs with operatorId & reportedCash', () => {

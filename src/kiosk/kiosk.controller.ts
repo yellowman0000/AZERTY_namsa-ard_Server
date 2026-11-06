@@ -76,24 +76,6 @@ export class KioskController {
     return this.kioskService.uploadEvidence(transactionId, file);
   }
 
-  @Get('logs/:transactionId/evidence/:fileName')
-  async getEvidence(
-    @Param('transactionId') transactionId: string,
-    @Param('fileName') fileName: string,
-    @Res() res: Response,
-  ) {
-    const evidence = await this.kioskService.getEvidence(
-      transactionId,
-      fileName,
-    );
-    res.set({
-      'Content-Type': evidence.mimetype,
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    res.send(evidence.buffer);
-  }
-
   // ───────────────────────────────────────────────────────────
   //  Reconciliation – query interpreted daily-log records
   //  GET /api/kiosk/reconciliation
