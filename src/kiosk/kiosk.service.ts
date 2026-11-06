@@ -1,10 +1,14 @@
+import * as crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import {
   Injectable,
   Logger,
+  BadRequestException,
   NotFoundException,
   OnModuleInit,
   OnModuleDestroy,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import {
@@ -24,10 +28,60 @@ import {
   SyncAck,
 } from './sync-ack';
 import { generateSignedReceipt } from './receipt';
+import type { ReadingTypeDto } from './dto/ingest-log.dto';
 
 // TODO: adjust these to your real business rules
 const PRICE_PER_UNIT = 1; // revenue per unit of meterVolume
 const ANOMALY_TOLERANCE = 0.05; // allowed |variance| / expectedRevenue
+const MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024;
+
+const EVIDENCE_FILE_TYPES = {
+  'image/jpeg': {
+    extension: 'jpg',
+    matches: (buffer: Buffer) =>
+      buffer.length >= 3 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff,
+  },
+  'image/png': {
+    extension: 'png',
+    matches: (buffer: Buffer) =>
+      buffer.length >= 8 &&
+      buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  'image/webp': {
+    extension: 'webp',
+    matches: (buffer: Buffer) =>
+      buffer.length >= 12 &&
+      buffer.toString('ascii', 0, 4) === 'RIFF' &&
+      buffer.toString('ascii', 8, 12) === 'WEBP',
+  },
+} as const;
+
+export interface EvidenceUploadFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+}
+
+interface EvidencePhotoRecord {
+  fileName: string;
+  mimeType: string;
+  image: Uint8Array;
+}
+
+function isProofImageUrlForTransaction(
+  proofImageUrl: string,
+  transactionId: string,
+): boolean {
+  const fileName = proofImageUrl.split('/').at(-1);
+  return (
+    proofImageUrl ===
+      `/api/kiosk/logs/${encodeURIComponent(transactionId)}/evidence/${fileName}` &&
+    /^[a-f\d]{64}\.(jpg|png|webp)$/i.test(fileName ?? '')
+  );
+}
 
 @Injectable()
 export class KioskService implements OnModuleInit, OnModuleDestroy {
@@ -35,6 +89,77 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
   private sweepTimer?: NodeJS.Timeout;
 
   constructor(private prisma: PrismaService) {}
+
+  async uploadEvidence(
+    transactionId: string,
+    file: EvidenceUploadFile,
+  ): Promise<{ proofImageUrl: string }> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(transactionId)) {
+      throw new BadRequestException('Invalid transactionId for evidence upload.');
+    }
+    if (file.buffer.length === 0) {
+      throw new BadRequestException('Evidence image is empty.');
+    }
+    if (file.buffer.length > MAX_EVIDENCE_FILE_SIZE) {
+      throw new PayloadTooLargeException('Evidence image must be 5 MB or smaller.');
+    }
+
+    const imageType =
+      EVIDENCE_FILE_TYPES[file.mimetype as keyof typeof EVIDENCE_FILE_TYPES];
+    if (!imageType || !imageType.matches(file.buffer)) {
+      throw new BadRequestException(
+        'Evidence must be a valid JPEG, PNG, or WebP image.',
+      );
+    }
+
+    const imageHash = crypto
+      .createHash('sha256')
+      .update(file.buffer)
+      .digest('hex');
+    const fileName = `${imageHash}.${imageType.extension}`;
+    await this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO "evidence_photos"
+        ("transaction_id", "file_name", "mime_type", "image")
+      VALUES
+        (${transactionId}, ${fileName}, ${file.mimetype}, ${file.buffer})
+      ON CONFLICT ("transaction_id") DO UPDATE SET
+        "file_name" = EXCLUDED."file_name",
+        "mime_type" = EXCLUDED."mime_type",
+        "image" = EXCLUDED."image"
+    `);
+
+    return {
+      proofImageUrl: `/api/kiosk/logs/${encodeURIComponent(transactionId)}/evidence/${fileName}`,
+    };
+  }
+
+  async getEvidence(
+    transactionId: string,
+    fileName: string,
+  ): Promise<{ buffer: Buffer; mimetype: string }> {
+    if (
+      !/^[A-Za-z0-9_-]{1,128}$/.test(transactionId) ||
+      !/^[a-f\d]{64}\.(jpg|png|webp)$/i.test(fileName)
+    ) {
+      throw new NotFoundException('Evidence image not found.');
+    }
+
+    const [evidence] = await this.prisma.$queryRaw<EvidencePhotoRecord[]>(
+      Prisma.sql`
+        SELECT "file_name" AS "fileName", "mime_type" AS "mimeType", "image"
+        FROM "evidence_photos"
+        WHERE "transaction_id" = ${transactionId}
+        LIMIT 1
+      `,
+    );
+    if (!evidence || evidence.fileName !== fileName) {
+      throw new NotFoundException('Evidence image not found.');
+    }
+    return {
+      buffer: Buffer.from(evidence.image),
+      mimetype: evidence.mimeType,
+    };
+  }
 
   onModuleInit() {
     // Proactively sweeps kiosks in background every 5s to mark stale kiosks as OFFLINE
@@ -156,13 +281,30 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 4. Story 14-2 – reject readings that conflict with server state
-    const conflict = await findMeterConflict(this.prisma, incoming);
+    const readingType: ReadingTypeDto =
+      dto.readingType ?? 'CUMULATIVE_METER';
+    const conflict =
+      readingType === 'DAILY_VOLUME'
+        ? null
+        : await findMeterConflict(this.prisma, incoming);
 
     if (conflict) {
       this.logger.warn(
         `State conflict for kiosk ${dto.kioskId} (txn: ${dto.transactionId}): ${conflict.reason}`,
       );
       throw toStateConflictException(incoming, conflict);
+    }
+
+    if (
+      dto.proofImageUrl &&
+      !isProofImageUrlForTransaction(
+        dto.proofImageUrl,
+        dto.transactionId,
+      )
+    ) {
+      throw new BadRequestException(
+        'proofImageUrl must reference an uploaded image for this transaction.',
+      );
     }
 
     // 5. Reconciliation figures (reportedCash is optional in the DTO

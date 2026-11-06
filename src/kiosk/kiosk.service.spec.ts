@@ -23,6 +23,8 @@ describe('KioskService', () => {
       findFirst: jest.Mock;
       create: jest.Mock;
     };
+    $executeRaw: jest.Mock;
+    $queryRaw: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -37,6 +39,8 @@ describe('KioskService', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
       },
+      $executeRaw: jest.fn(),
+      $queryRaw: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -419,6 +423,46 @@ describe('KioskService', () => {
       }
 
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
+    });
+
+    it('should accept a lower daily volume without applying cumulative-meter conflict checks', async () => {
+      const dailyVolumeDto: IngestLogDto = {
+        ...validRaw,
+        transactionId: 'TXN-DAILY-VOLUME-001',
+        meterVolume: 12.5,
+        readingType: 'DAILY_VOLUME',
+      };
+      const recordedAt = new Date(dailyVolumeDto.recordedAt);
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      prisma.dailyLog.findFirst.mockResolvedValue({
+        transactionId: 'TXN-OLDER',
+        meterVolume: 50,
+        recordedAt: new Date('2026-10-16T09:00:00.000Z'),
+      });
+      prisma.dailyLog.create.mockResolvedValue({
+        id: 'uuid-daily-volume-1',
+        transactionId: dailyVolumeDto.transactionId,
+        kioskId: dailyVolumeDto.kioskId,
+        meterVolume: dailyVolumeDto.meterVolume,
+        recordedAt,
+        createdAt: new Date(),
+        checksum: null,
+        isSynced: true,
+      });
+
+      const result = await service.ingestLog(dailyVolumeDto);
+
+      expect(result.meterVolume).toBe(12.5);
+      expect(prisma.dailyLog.findFirst).not.toHaveBeenCalled();
+      expect(prisma.dailyLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            meterVolume: 12.5,
+            transactionId: 'TXN-DAILY-VOLUME-001',
+          }),
+        }),
+      );
     });
   });
 

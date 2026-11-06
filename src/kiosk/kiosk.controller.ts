@@ -8,10 +8,20 @@ import {
   Res,
   HttpStatus,
   BadRequestException,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
+
+const MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_EVIDENCE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 @Controller(['api/kiosk', 'kiosk', 'api', ''])
 export class KioskController {
@@ -34,6 +44,54 @@ export class KioskController {
     const ack = await this.kioskService.ingestLog(dto);
     if (ack.duplicate) res.status(HttpStatus.OK);
     return ack;
+  }
+
+  @Post('logs/:transactionId/evidence')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_EVIDENCE_FILE_SIZE, files: 1 },
+      fileFilter: (_request, file, callback) => {
+        if (!ALLOWED_EVIDENCE_TYPES.has(file.mimetype)) {
+          callback(
+            new BadRequestException(
+              'Evidence must be a JPEG, PNG, or WebP image.',
+            ),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadEvidence(
+    @Param('transactionId') transactionId: string,
+    @UploadedFile()
+    file: { buffer: Buffer; mimetype: string; originalname: string } | undefined,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Attach an image file in the "file" field.');
+    }
+
+    return this.kioskService.uploadEvidence(transactionId, file);
+  }
+
+  @Get('logs/:transactionId/evidence/:fileName')
+  async getEvidence(
+    @Param('transactionId') transactionId: string,
+    @Param('fileName') fileName: string,
+    @Res() res: Response,
+  ) {
+    const evidence = await this.kioskService.getEvidence(
+      transactionId,
+      fileName,
+    );
+    res.set({
+      'Content-Type': evidence.mimetype,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(evidence.buffer);
   }
 
   // ───────────────────────────────────────────────────────────

@@ -50,6 +50,8 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | POST   | `/api/kiosk/heartbeat`                                | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
 | GET    | `/api/kiosk/status/:id`                               | Get kiosk status (`ONLINE` / `OFFLINE`)       |
 | POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
+| POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB); returns `proofImageUrl` |
+| GET    | `/api/kiosk/logs/:transactionId/evidence/:fileName`   | Retrieve an uploaded evidence photo through the server |
 | GET    | `/api/kiosk/logs?kioskId=&cursor=&limit=`             | Read-only log history, newest first — `{ "data": [...], "nextCursor": "<logId>" \| null }` (`limit` 1–100, default 20) |
 | GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
 
@@ -75,10 +77,20 @@ The response also carries `storedChecksum`, `recomputedChecksum`, the matched
   "operatorId": "OP-001",
   "meterVolume": 12.5,
   "reportedCash": 250.0,
+  "readingType": "DAILY_VOLUME",
   "recordedAt": "2026-10-18T09:00:00.000Z",
+  "proofImageUrl": "/api/kiosk/logs/TX-0001/evidence/<sha256>.jpg",
   "checksum": "optional-sha256"
 }
 ```
+
+`readingType` accepts `DAILY_VOLUME` (may change independently each day) and
+`CUMULATIVE_METER` (must remain monotonic). Omitted values default to
+`CUMULATIVE_METER` for older clients. Evidence uploads are stored as bytes in
+the PostgreSQL `evidence_photos` table, using the same `DATABASE_URL` as the
+rest of the server. After pulling this change, sync the database schema with
+`bunx prisma db push` before starting the server. Images are limited to 5 MB
+and served through the API using the stable URL stored in `proofImageUrl`.
 
 Receipt payload computed on the server:
 - **Checksum:** `SHA-256(kioskId + operatorId + meterVolume + reportedCash + recordedAt)`

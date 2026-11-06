@@ -7,11 +7,14 @@ import {
   IsOptional,
   IsBoolean,
   IsIn,
+  MaxLength,
   Min,
 } from 'class-validator';
 
 export const WATER_TYPES = ['COMMERCIAL', 'SUBSIDIZED'] as const;
 export type WaterTypeDto = (typeof WATER_TYPES)[number];
+export const READING_TYPES = ['CUMULATIVE_METER', 'DAILY_VOLUME'] as const;
+export type ReadingTypeDto = (typeof READING_TYPES)[number];
 
 /**
  * DTO for ingesting a daily log / meter-volume reading from a kiosk.
@@ -45,6 +48,13 @@ export class IngestLogDto {
   @Min(0, { message: 'reportedCash must be non-negative' })
   reportedCash?: number;
 
+  /** Daily volumes may decrease; cumulative meter readings must be monotonic. */
+  @IsOptional()
+  @IsIn(READING_TYPES, {
+    message: 'readingType must be CUMULATIVE_METER or DAILY_VOLUME',
+  })
+  readingType?: ReadingTypeDto;
+
   /** Optional expected revenue calculated for the reading. */
   @IsOptional()
   @IsNumber({}, { message: 'expectedRevenue must be a number' })
@@ -64,6 +74,7 @@ export class IngestLogDto {
   /** Optional URL/path to the physical meter/receipt photo proof (Story 05). */
   @IsOptional()
   @IsString({ message: 'proofImageUrl must be a string' })
+  @MaxLength(512)
   proofImageUrl?: string;
 
   /** Optional water pricing tier: COMMERCIAL or SUBSIDIZED (Story 09). */

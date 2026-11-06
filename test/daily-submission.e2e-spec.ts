@@ -18,6 +18,8 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn(),
     },
+    $executeRaw: jest.fn(),
+    $queryRaw: jest.fn(),
   };
 
   beforeAll(async () => {
@@ -41,6 +43,7 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
     jest.clearAllMocks();
     mockPrisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
     mockPrisma.dailyLog.findUnique.mockResolvedValue(null);
+    mockPrisma.dailyLog.findFirst.mockResolvedValue(null);
     mockPrisma.dailyLog.create.mockImplementation(({ data }) =>
       Promise.resolve({
         id: 'mock-log-uuid-1',
@@ -48,6 +51,89 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
         createdAt: new Date(),
       }),
     );
+  });
+
+  it('accepts decreasing DAILY_VOLUME readings through the validation pipe', async () => {
+    mockPrisma.dailyLog.findFirst.mockResolvedValue({
+      transactionId: 'TXN-OLDER',
+      meterVolume: 50,
+      recordedAt: new Date('2026-11-04T09:00:00.000Z'),
+    });
+
+    const res = await request(app.getHttpServer())
+      .post('/api/kiosk/logs')
+      .send({
+        transactionId: 'TXN-DAILY-VOLUME-001',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OPERATOR-77',
+        readingType: 'DAILY_VOLUME',
+        meterVolume: 12.5,
+        reportedCash: 20,
+        recordedAt: '2026-11-04T10:00:00.000Z',
+      })
+      .expect(201);
+
+    expect(res.body.ack).toBe(true);
+    expect(res.body.meterVolume).toBe(12.5);
+    expect(mockPrisma.dailyLog.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.dailyLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionId: 'TXN-DAILY-VOLUME-001',
+          meterVolume: 12.5,
+        }),
+      }),
+    );
+  });
+
+  it('uploads evidence to PostgreSQL, persists its proofImageUrl, and serves the image', async () => {
+    const image = Buffer.from([0xff, 0xd8, 0xff]);
+    const upload = await request(app.getHttpServer())
+      .post('/api/kiosk/logs/TXN-EVIDENCE-001/evidence')
+      .attach('file', image, {
+        filename: 'meter.jpg',
+        contentType: 'image/jpeg',
+      })
+      .expect(201);
+
+    const proofImageUrl = upload.body.proofImageUrl as string;
+    expect(proofImageUrl).toMatch(
+      /^\/api\/kiosk\/logs\/TXN-EVIDENCE-001\/evidence\/[a-f\d]{64}\.jpg$/,
+    );
+
+    const logResponse = await request(app.getHttpServer())
+      .post('/api/kiosk/logs')
+      .send({
+        transactionId: 'TXN-EVIDENCE-001',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OPERATOR-77',
+        readingType: 'DAILY_VOLUME',
+        meterVolume: 12.5,
+        reportedCash: 20,
+        proofImageUrl,
+        recordedAt: '2026-11-04T10:00:00.000Z',
+      })
+      .expect(201);
+
+    expect(logResponse.body.proofImageUrl).toBe(proofImageUrl);
+    expect(mockPrisma.dailyLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ proofImageUrl }),
+      }),
+    );
+    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+
+    const fileName = proofImageUrl.split('/').at(-1)!;
+    mockPrisma.$queryRaw.mockResolvedValue([{
+      fileName,
+      mimeType: 'image/jpeg',
+      image,
+    }]);
+    const imageResponse = await request(app.getHttpServer())
+      .get(proofImageUrl)
+      .expect(200)
+      .expect('Content-Type', 'image/jpeg');
+    expect(imageResponse.body).toEqual(image);
   });
 
   describe('POST /api/kiosk/logs with operatorId & reportedCash', () => {
