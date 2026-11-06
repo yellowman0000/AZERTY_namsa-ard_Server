@@ -50,6 +50,21 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | POST   | `/api/kiosk/heartbeat`                                | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
 | GET    | `/api/kiosk/status/:id`                               | Get kiosk status (`ONLINE` / `OFFLINE`)       |
 | POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
+| GET    | `/api/kiosk/logs?kioskId=&cursor=&limit=`             | Read-only log history, newest first — `{ "data": [...], "nextCursor": "<logId>" \| null }` (`limit` 1–100, default 20) |
+| GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
+
+`GET /api/kiosk/logs/:id/inspect` recomputes the SHA-256 checksum from the
+row's **current** database values and compares it with the checksum stored at
+submission, so a row edited after submission is flagged:
+
+| `verification.status` | Meaning |
+| --------------------- | ------- |
+| `VERIFIED`            | Stored row matches its submission checksum (badge: *Verified (Tamper-Evident)*) |
+| `CHECKSUM_MISMATCH`   | Row changed since submission (badge: *Checksum Mismatch*) |
+| `NO_CHECKSUM`         | Log was submitted without a checksum, so it can't be verified |
+
+The response also carries `storedChecksum`, `recomputedChecksum`, the matched
+`format` (`v1`, `legacy` or `receipt`) and `verifiedAt`.
 
 `POST /api/kiosk/logs` (or `/daily-submission`) body:
 
