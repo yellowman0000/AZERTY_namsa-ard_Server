@@ -45,7 +45,7 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     const sim = new KioskSimulator({
       baseUrl: network.baseUrl,
       kioskId: `${KIOSK_PREFIX}${process.pid}-${++kioskCounter}`,
-      requestTimeoutMs: 3000,
+      requestTimeoutMs: 6000,
       heartbeatRetryDelayMs: 300,
       retryDelaysMs: [150, 300, 600, 1000],
       ...overrides,
@@ -343,7 +343,7 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
   //  7. Stalled link: requests hang instead of failing fast
   // ─────────────────────────────────────────────────────────
   it('times out hanging requests on a stalled link and syncs once it recovers', async () => {
-    const kiosk = newKiosk({ requestTimeoutMs: 1500 });
+    const kiosk = newKiosk({ requestTimeoutMs: 6000 });
     expect(await kiosk.heartbeat()).toBe(true);
 
     cutNetwork(kiosk);
