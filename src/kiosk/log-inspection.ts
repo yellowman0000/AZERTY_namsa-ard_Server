@@ -36,6 +36,10 @@ export interface InspectableLog {
   expectedRevenue?: number | null;
   variance?: number | null;
   isAnomaly?: boolean | null;
+  proofImageUrl?: string | null;
+  waterType?: 'COMMERCIAL' | 'SUBSIDIZED' | null;
+  isSynced?: boolean | null;
+  isReadByManager?: boolean | null;
 }
 
 export interface ChecksumVerification {
@@ -60,6 +64,10 @@ export interface InspectedLog {
   expectedRevenue: number | null;
   variance: number | null;
   isAnomaly: boolean | null;
+  proofImageUrl?: string | null;
+  waterType?: 'COMMERCIAL' | 'SUBSIDIZED' | null;
+  isSynced?: boolean | null;
+  isReadByManager?: boolean | null;
 }
 
 export interface LogInspection {
@@ -162,6 +170,14 @@ export function toLogInspection(
       expectedRevenue: log.expectedRevenue ?? null,
       variance: log.variance ?? null,
       isAnomaly: log.isAnomaly ?? null,
+      ...(log.proofImageUrl !== undefined
+        ? { proofImageUrl: log.proofImageUrl }
+        : {}),
+      ...(log.waterType !== undefined ? { waterType: log.waterType } : {}),
+      ...(log.isSynced !== undefined ? { isSynced: log.isSynced } : {}),
+      ...(log.isReadByManager !== undefined
+        ? { isReadByManager: log.isReadByManager }
+        : {}),
     },
     verification: verifyStoredChecksum(log, now),
   };

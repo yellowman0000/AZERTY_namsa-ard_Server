@@ -10,7 +10,7 @@ import {
   toSheetText,
 } from './daily-log-row.mapper';
 
-describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
+describe('DailyLog → Google Sheets row mapper (Story 03 – KES & Proof Image URL)', () => {
   const fullLog: SheetDailyLog = {
     id: 'b2c1f3a4-1111-4222-8333-944455556666',
     transactionId: 'TXN-20261031-001',
@@ -22,6 +22,7 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
     expectedRevenue: 1000,
     variance: -50,
     isAnomaly: false,
+    proofImageUrl: 'https://storage.namsa-ard.ke/proofs/txn-001.jpg',
     recordedAt: new Date('2026-10-31T10:00:00.000Z'),
     createdAt: new Date('2026-10-31T10:00:01.120Z'),
     checksum:
@@ -32,7 +33,7 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
     row[DAILY_LOG_SHEET_HEADERS.indexOf(header)];
 
   describe('column layout', () => {
-    it('has a stable, ordered header row', () => {
+    it('has a stable, ordered header row with KES currency and Proof Image URL', () => {
       expect(DAILY_LOG_SHEET_HEADERS).toEqual([
         'Log ID',
         'Transaction ID',
@@ -40,14 +41,15 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
         'Operator ID',
         'Water Type',
         'Meter Volume (L)',
-        'Reported Cash (THB)',
-        'Expected Revenue (THB)',
-        'Variance (THB)',
+        'Reported Cash (KES)',
+        'Expected Revenue (KES)',
+        'Variance (KES)',
         'Discrepancy (%)',
         'Anomaly',
         'Recorded At',
         'Server Received At',
         'Checksum (SHA-256)',
+        'Proof Image URL',
       ]);
     });
 
@@ -75,18 +77,19 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
         '2026-10-31 17:00:00',
         '2026-10-31 17:00:01',
         'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        'https://storage.namsa-ard.ke/proofs/txn-001.jpg',
       ]);
     });
 
     it('keeps numeric columns as numbers so sheet number formats apply', () => {
       const row = mapDailyLogToRow(fullLog);
       expect(typeof cell(row, 'Meter Volume (L)')).toBe('number');
-      expect(typeof cell(row, 'Reported Cash (THB)')).toBe('number');
-      expect(typeof cell(row, 'Variance (THB)')).toBe('number');
+      expect(typeof cell(row, 'Reported Cash (KES)')).toBe('number');
+      expect(typeof cell(row, 'Variance (KES)')).toBe('number');
       expect(typeof cell(row, 'Anomaly')).toBe('boolean');
     });
 
-    it('maps a Sprint 1 log (no reconciliation fields) with empty cells, never "null"', () => {
+    it('maps a minimal log (no optional fields) with empty cells, never "null"', () => {
       const row = mapDailyLogToRow({
         id: 'log-1',
         transactionId: 'TX-0001',
@@ -112,25 +115,37 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
         '2026-10-18 16:00:00',
         '2026-10-18 16:00:02',
         '',
+        '',
       ]);
       expect(row).not.toContain(null);
       expect(row).not.toContain(undefined);
       expect(row).not.toContain('null');
     });
 
-    it('accepts a Prisma DailyLog shape (extra fields are ignored)', () => {
+    it('accepts a full Prisma DailyLog shape (extra fields like isReadByManager are ignored)', () => {
       const prismaLog = {
         id: 'log-2',
         transactionId: 'TX-0002',
         kioskId: 'KIOSK-002',
-        meterVolume: 1,
+        operatorId: 'OP-09',
+        meterVolume: 100,
+        reportedCash: 200,
+        expectedRevenue: 200,
+        variance: 0,
+        isAnomaly: false,
+        proofImageUrl: '/api/kiosk/evidence/TX-0002.jpg',
         checksum: 'abc',
+        waterType: 'SUBSIDIZED' as const,
         isSynced: true,
+        isReadByManager: false,
         recordedAt: new Date('2026-01-01T00:00:00.000Z'),
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       };
-      expect(mapDailyLogToRow(prismaLog)).toHaveLength(
-        DAILY_LOG_SHEET_HEADERS.length,
+      const row = mapDailyLogToRow(prismaLog);
+      expect(row).toHaveLength(DAILY_LOG_SHEET_HEADERS.length);
+      expect(cell(row, 'Water Type')).toBe('SUBSIDIZED');
+      expect(cell(row, 'Proof Image URL')).toBe(
+        '/api/kiosk/evidence/TX-0002.jpg',
       );
     });
 
@@ -148,9 +163,9 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
         variance: -0.30000000000000004,
       });
       expect(cell(row, 'Meter Volume (L)')).toBe(100.3);
-      expect(cell(row, 'Reported Cash (THB)')).toBe(0.3);
-      expect(cell(row, 'Expected Revenue (THB)')).toBe(1.01);
-      expect(cell(row, 'Variance (THB)')).toBe(-0.3);
+      expect(cell(row, 'Reported Cash (KES)')).toBe(0.3);
+      expect(cell(row, 'Expected Revenue (KES)')).toBe(1.01);
+      expect(cell(row, 'Variance (KES)')).toBe(-0.3);
     });
 
     it('renders timestamps in the requested time zone', () => {
@@ -165,8 +180,8 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
         reportedCash: Number.NaN,
         variance: Number.POSITIVE_INFINITY,
       });
-      expect(cell(row, 'Reported Cash (THB)')).toBe('');
-      expect(cell(row, 'Variance (THB)')).toBe('');
+      expect(cell(row, 'Reported Cash (KES)')).toBe('');
+      expect(cell(row, 'Variance (KES)')).toBe('');
       expect(cell(row, 'Discrepancy (%)')).toBe('');
     });
   });
@@ -186,6 +201,7 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
       ['00123', `'00123`],
       ['1e5', `'1e5`],
       ['12%', `'12%`],
+      ['KES 200', `'KES 200`],
       ['2026-10-31', `'2026-10-31`],
       ['10/31', `'10/31`],
       ['TRUE', `'TRUE`],
@@ -279,7 +295,7 @@ describe('DailyLog → Google Sheets row mapper (Story 03)', () => {
 
     it.each([
       [1, 'A'],
-      [14, 'N'],
+      [15, 'O'],
       [26, 'Z'],
       [27, 'AA'],
       [52, 'AZ'],

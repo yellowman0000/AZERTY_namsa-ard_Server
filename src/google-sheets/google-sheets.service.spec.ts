@@ -74,7 +74,7 @@ function makeFakeClient(
               Promise.resolve({
                 data: {
                   updates: {
-                    updatedRange: `'DailyLogs'!A2:N${1 + params.requestBody.values.length}`,
+                    updatedRange: `'DailyLogs'!A2:O${1 + params.requestBody.values.length}`,
                     updatedRows: params.requestBody.values.length,
                   },
                 },
@@ -123,7 +123,7 @@ describe('GoogleSheetsService (Story 03)', () => {
       const params = client.spreadsheets.values.append.mock.calls[0][0];
       expect(params).toMatchObject({
         spreadsheetId: 'sheet-123',
-        range: "'DailyLogs'!A:N",
+        range: "'DailyLogs'!A:O",
         valueInputOption: 'USER_ENTERED',
         insertDataOption: 'INSERT_ROWS',
         requestBody: { majorDimension: 'ROWS' },
@@ -135,7 +135,7 @@ describe('GoogleSheetsService (Story 03)', () => {
 
       expect(result).toEqual({
         appendedRows: 2,
-        updatedRange: "'DailyLogs'!A2:N3",
+        updatedRange: "'DailyLogs'!A2:O3",
         syncedLogIds: ['a', 'b'],
       });
     });
@@ -174,7 +174,7 @@ describe('GoogleSheetsService (Story 03)', () => {
       await service.appendDailyLogs([makeLog('a')]);
 
       expect(client.spreadsheets.values.append.mock.calls[0][0].range).toBe(
-        "'Kiosk Logs ''26'!A:N",
+        "'Kiosk Logs ''26'!A:O",
       );
     });
 
@@ -286,11 +286,11 @@ describe('GoogleSheetsService (Story 03)', () => {
 
       expect(client.spreadsheets.values.get).toHaveBeenCalledWith({
         spreadsheetId: 'sheet-123',
-        range: "'DailyLogs'!A1:N1",
+        range: "'DailyLogs'!A1:O1",
       });
       expect(client.spreadsheets.values.update).toHaveBeenCalledWith({
         spreadsheetId: 'sheet-123',
-        range: "'DailyLogs'!A1:N1",
+        range: "'DailyLogs'!A1:O1",
         valueInputOption: 'RAW',
         requestBody: {
           majorDimension: 'ROWS',

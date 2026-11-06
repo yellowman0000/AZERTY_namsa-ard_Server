@@ -20,11 +20,22 @@ export const SYNCHRONIZED = 'SYNCHRONIZED';
 /** Error code for a reused transactionId. Distinct from `STATE_CONFLICT`. */
 export const DUPLICATE_TRANSACTION = 'DUPLICATE_TRANSACTION';
 
+export type WaterTypeValue = 'COMMERCIAL' | 'SUBSIDIZED';
+
 export interface StoredLog {
   id: string;
   transactionId: string;
   kioskId: string;
+  operatorId?: string | null;
   meterVolume: number;
+  reportedCash?: number | null;
+  expectedRevenue?: number | null;
+  variance?: number | null;
+  isAnomaly?: boolean | null;
+  proofImageUrl?: string | null;
+  waterType?: WaterTypeValue | null;
+  isSynced?: boolean | null;
+  isReadByManager?: boolean | null;
   recordedAt: Date;
   createdAt: Date;
 }
@@ -38,9 +49,15 @@ export interface SyncAck {
   logId: string;
   transactionId: string;
   kioskId: string;
-  operatorId?: string;
+  operatorId?: string | null;
   meterVolume: number;
-  reportedCash?: number;
+  reportedCash?: number | null;
+  expectedRevenue?: number | null;
+  variance?: number | null;
+  isAnomaly?: boolean | null;
+  proofImageUrl?: string | null;
+  waterType?: WaterTypeValue | null;
+  isReadByManager?: boolean | null;
   recordedAt: Date;
   /** Server-side timestamp of when the record was first stored. */
   createdAt: Date;
@@ -69,12 +86,38 @@ export function toSyncAck(
     createdAt: log.createdAt,
   };
 
-  if (operatorId !== undefined) {
-    ack.operatorId = operatorId;
+  const resolvedOperatorId = operatorId ?? log.operatorId;
+  if (resolvedOperatorId !== undefined && resolvedOperatorId !== null) {
+    ack.operatorId = resolvedOperatorId;
   }
 
-  if (reportedCash !== undefined) {
-    ack.reportedCash = reportedCash;
+  const resolvedReportedCash = reportedCash ?? log.reportedCash;
+  if (resolvedReportedCash !== undefined && resolvedReportedCash !== null) {
+    ack.reportedCash = resolvedReportedCash;
+  }
+
+  if (log.expectedRevenue !== undefined && log.expectedRevenue !== null) {
+    ack.expectedRevenue = log.expectedRevenue;
+  }
+
+  if (log.variance !== undefined && log.variance !== null) {
+    ack.variance = log.variance;
+  }
+
+  if (log.isAnomaly !== undefined && log.isAnomaly !== null) {
+    ack.isAnomaly = log.isAnomaly;
+  }
+
+  if (log.proofImageUrl !== undefined && log.proofImageUrl !== null) {
+    ack.proofImageUrl = log.proofImageUrl;
+  }
+
+  if (log.waterType !== undefined && log.waterType !== null) {
+    ack.waterType = log.waterType;
+  }
+
+  if (log.isReadByManager !== undefined && log.isReadByManager !== null) {
+    ack.isReadByManager = log.isReadByManager;
   }
 
   if (receipt !== undefined) {

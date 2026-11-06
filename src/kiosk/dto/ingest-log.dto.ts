@@ -5,8 +5,13 @@ import {
   IsPositive,
   IsDateString,
   IsOptional,
+  IsBoolean,
+  IsIn,
   Min,
 } from 'class-validator';
+
+export const WATER_TYPES = ['COMMERCIAL', 'SUBSIDIZED'] as const;
+export type WaterTypeDto = (typeof WATER_TYPES)[number];
 
 /**
  * DTO for ingesting a daily log / meter-volume reading from a kiosk.
@@ -24,7 +29,7 @@ export class IngestLogDto {
   @IsNotEmpty({ message: 'kioskId is required' })
   kioskId!: string;
 
-  /** Optional ID of the operator who collected/submitted the daily log. */
+  /** Optional ID of the operator who collected/submitted the daily log (Story 05). */
   @IsOptional()
   @IsString({ message: 'operatorId must be a string' })
   operatorId?: string;
@@ -40,8 +45,39 @@ export class IngestLogDto {
   @Min(0, { message: 'reportedCash must be non-negative' })
   reportedCash?: number;
 
+  /** Optional expected revenue calculated for the reading. */
+  @IsOptional()
+  @IsNumber({}, { message: 'expectedRevenue must be a number' })
+  @Min(0, { message: 'expectedRevenue must be non-negative' })
+  expectedRevenue?: number;
+
+  /** Optional variance between reportedCash and expectedRevenue. */
+  @IsOptional()
+  @IsNumber({}, { message: 'variance must be a number' })
+  variance?: number;
+
+  /** Optional flag indicating whether this reading is a volume anomaly. */
+  @IsOptional()
+  @IsBoolean({ message: 'isAnomaly must be a boolean' })
+  isAnomaly?: boolean;
+
+  /** Optional URL/path to the physical meter/receipt photo proof (Story 05). */
+  @IsOptional()
+  @IsString({ message: 'proofImageUrl must be a string' })
+  proofImageUrl?: string;
+
+  /** Optional water pricing tier: COMMERCIAL or SUBSIDIZED (Story 09). */
+  @IsOptional()
+  @IsIn(WATER_TYPES, {
+    message: 'waterType must be COMMERCIAL or SUBSIDIZED',
+  })
+  waterType?: WaterTypeDto;
+
   /** ISO-8601 timestamp of when the reading was recorded on the kiosk. */
-  @IsDateString({}, { message: 'recordedAt must be a valid ISO-8601 date string' })
+  @IsDateString(
+    {},
+    { message: 'recordedAt must be a valid ISO-8601 date string' },
+  )
   @IsNotEmpty({ message: 'recordedAt is required' })
   recordedAt!: string;
 

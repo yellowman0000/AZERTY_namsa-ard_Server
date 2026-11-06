@@ -14,9 +14,8 @@
 //      prefixed with an apostrophe so it is stored verbatim as text — this
 //      also blocks formula injection through kiosk-supplied strings.
 //
-//  The Sprint 2 reconciliation fields (operatorId, reportedCash, …) are
-//  optional so the mapper works both before and after they are added to the
-//  Prisma schema.
+//  Matches the Sprint 2 Prisma `DailyLog` model (including `WaterType`,
+//  reconciliation metrics in KES, `proofImageUrl`, and `isReadByManager`).
 // ───────────────────────────────────────────────────────────
 
 /** The subset of a DailyLog the sheet needs. A Prisma `DailyLog` satisfies it. */
@@ -33,7 +32,10 @@ export interface SheetDailyLog {
   expectedRevenue?: number | null;
   variance?: number | null;
   isAnomaly?: boolean | null;
+  proofImageUrl?: string | null;
   checksum?: string | null;
+  isSynced?: boolean | null;
+  isReadByManager?: boolean | null;
 }
 
 export type SheetCellValue = string | number | boolean;
@@ -55,7 +57,7 @@ const EMPTY = '';
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 /** Strings Sheets would silently convert to a number, percent or currency. */
 const NUMBER_LIKE =
-  /^\s*[-+]?[$฿€£]?\s*(\d[\d,]*\.?\d*|\.\d+)([eE][-+]?\d+)?\s*%?\s*$/;
+  /^\s*[-+]?(?:[$฿€£]|KSh|KES)?\s*(\d[\d,]*\.?\d*|\.\d+)([eE][-+]?\d+)?\s*%?\s*$/i;
 /** Strings Sheets would silently convert to a date or time. */
 const DATE_LIKE = /^\s*(\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?|\d{1,2}:\d{2})/;
 const BOOLEAN_LIKE = /^\s*(true|false)\s*$/i;
@@ -173,14 +175,14 @@ export const DAILY_LOG_SHEET_COLUMNS: readonly SheetColumn[] = [
   { header: 'Water Type', cell: (l) => toSheetText(l.waterType) },
   { header: 'Meter Volume (L)', cell: (l) => toSheetNumber(l.meterVolume, 3) },
   {
-    header: 'Reported Cash (THB)',
+    header: 'Reported Cash (KES)',
     cell: (l) => toSheetNumber(l.reportedCash, 2),
   },
   {
-    header: 'Expected Revenue (THB)',
+    header: 'Expected Revenue (KES)',
     cell: (l) => toSheetNumber(l.expectedRevenue, 2),
   },
-  { header: 'Variance (THB)', cell: (l) => toSheetNumber(l.variance, 2) },
+  { header: 'Variance (KES)', cell: (l) => toSheetNumber(l.variance, 2) },
   { header: 'Discrepancy (%)', cell: (l) => discrepancyPercent(l) },
   { header: 'Anomaly', cell: (l) => toSheetBoolean(l.isAnomaly) },
   {
@@ -192,6 +194,7 @@ export const DAILY_LOG_SHEET_COLUMNS: readonly SheetColumn[] = [
     cell: (l, tz) => formatSheetDateTime(l.createdAt, tz),
   },
   { header: 'Checksum (SHA-256)', cell: (l) => toSheetText(l.checksum) },
+  { header: 'Proof Image URL', cell: (l) => toSheetText(l.proofImageUrl) },
 ];
 
 /** Header row written to row 1 of the sheet. */
