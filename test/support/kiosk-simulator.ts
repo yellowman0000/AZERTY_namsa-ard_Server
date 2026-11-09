@@ -89,7 +89,9 @@ export class StorageBackedQueue implements OfflineQueueAdapter {
 
   private read(): CachedTransaction[] {
     try {
-      const parsed: unknown = JSON.parse(this.storage.getItem(this.key) ?? '[]');
+      const parsed: unknown = JSON.parse(
+        this.storage.getItem(this.key) ?? '[]',
+      );
       return Array.isArray(parsed) ? (parsed as CachedTransaction[]) : [];
     } catch {
       return [];
@@ -102,7 +104,8 @@ export class StorageBackedQueue implements OfflineQueueAdapter {
 
   enqueue(item: CachedTransaction): boolean {
     const items = this.read();
-    if (items.some((i) => i.transaction_id === item.transaction_id)) return false;
+    if (items.some((i) => i.transaction_id === item.transaction_id))
+      return false;
     items.push(item);
     this.write(items);
     return true;
@@ -138,7 +141,10 @@ export class StorageBackedQueue implements OfflineQueueAdapter {
 
 /** v1 canonical checksum – same algorithm as client `checksum.ts` / server `checksum-validator.ts`. */
 export function computeV1Checksum(
-  r: Pick<CachedTransaction, 'transaction_id' | 'kiosk_id' | 'meter_volume' | 'recorded_at'>,
+  r: Pick<
+    CachedTransaction,
+    'transaction_id' | 'kiosk_id' | 'meter_volume' | 'recorded_at'
+  >,
 ): string {
   const canonical =
     `v1|kiosk:${r.kiosk_id.trim()}` +
@@ -170,7 +176,10 @@ export interface ServerAck {
  * not one. A 2xx alone (captive portal, misbehaving proxy) does not prove the
  * record was stored.
  */
-function readServerAck(res: HttpResult, transactionId: string): ServerAck | null {
+function readServerAck(
+  res: HttpResult,
+  transactionId: string,
+): ServerAck | null {
   const { body } = res;
   const confirmed =
     (res.status === 200 || res.status === 201) &&
@@ -195,7 +204,10 @@ function postJson(
       {
         method: 'POST',
         agent: false,
-        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': data.length,
+        },
         timeout: timeoutMs,
         signal,
       },
@@ -205,7 +217,9 @@ function postJson(
         res.on('end', () => {
           let body: Record<string, unknown> = {};
           try {
-            body = JSON.parse(Buffer.concat(chunks).toString() || '{}') as Record<string, unknown>;
+            body = JSON.parse(
+              Buffer.concat(chunks).toString() || '{}',
+            ) as Record<string, unknown>;
           } catch {
             /* non-JSON body */
           }
@@ -214,7 +228,9 @@ function postJson(
         res.on('error', (e) => reject(new NetworkError(e.message)));
       },
     );
-    req.on('timeout', () => req.destroy(new NetworkError(`timeout after ${timeoutMs}ms`)));
+    req.on('timeout', () =>
+      req.destroy(new NetworkError(`timeout after ${timeoutMs}ms`)),
+    );
     req.on('error', (e) => reject(new NetworkError(e.message)));
     req.end(data);
   });
@@ -314,10 +330,16 @@ export class KioskSimulator {
     return this.syncLoop !== null;
   }
 
-  private emit(type: SyncEvent['type'], transactionId?: string, detail?: string): void {
+  private emit(
+    type: SyncEvent['type'],
+    transactionId?: string,
+    detail?: string,
+  ): void {
     this.events.push({ type, transactionId, detail, at: Date.now() });
     const id = transactionId ? ` ${transactionId.slice(0, 8)}…` : '';
-    this.log(`[kiosk ${this.kioskId}] ${type}${id}${detail ? ` – ${detail}` : ''}`);
+    this.log(
+      `[kiosk ${this.kioskId}] ${type}${id}${detail ? ` – ${detail}` : ''}`,
+    );
   }
 
   /* ───────────── Story 01 – heartbeat ───────────── */
@@ -326,7 +348,11 @@ export class KioskSimulator {
     try {
       const res = await postJson(
         `${this.baseUrl}/api/kiosk/heartbeat`,
-        { kioskId: this.kioskId, kiosk_id: this.kioskId, client_timestamp: new Date().toISOString() },
+        {
+          kioskId: this.kioskId,
+          kiosk_id: this.kioskId,
+          client_timestamp: new Date().toISOString(),
+        },
         this.requestTimeoutMs,
         signal,
       );
@@ -362,11 +388,18 @@ export class KioskSimulator {
    */
   async submitReading(
     meterVolume: number,
-  ): Promise<{ via: 'server' | 'queue' | 'rejected'; record: CachedTransaction }> {
+  ): Promise<{
+    via: 'server' | 'queue' | 'rejected';
+    record: CachedTransaction;
+  }> {
     const record = this.createRecord(meterVolume);
 
     // Keep FIFO: if older records are still waiting, new ones must queue behind them.
-    if (this.browserOnline && this.state === 'online' && this.queue.size() === 0) {
+    if (
+      this.browserOnline &&
+      this.state === 'online' &&
+      this.queue.size() === 0
+    ) {
       try {
         const res = await this.send(record, this.session?.signal);
         if (readServerAck(res, record.transaction_id)) {
@@ -490,9 +523,15 @@ export class KioskSimulator {
           break;
         case 'retry': {
           const delay =
-            this.retryDelaysMs[Math.min(attempt, this.retryDelaysMs.length - 1)];
+            this.retryDelaysMs[
+              Math.min(attempt, this.retryDelaysMs.length - 1)
+            ];
           attempt++;
-          this.emit('retry', head.transaction_id, `${detail}; next try in ${delay}ms`);
+          this.emit(
+            'retry',
+            head.transaction_id,
+            `${detail}; next try in ${delay}ms`,
+          );
           await this.sleep(delay, signal);
           break;
         }
@@ -522,7 +561,10 @@ export class KioskSimulator {
     );
   }
 
-  private send(record: CachedTransaction, signal?: AbortSignal): Promise<HttpResult> {
+  private send(
+    record: CachedTransaction,
+    signal?: AbortSignal,
+  ): Promise<HttpResult> {
     // Same body shape as the real client (`api.ts`): camelCase for the DTO + snake_case.
     return postJson(
       `${this.baseUrl}/api/kiosk/logs`,

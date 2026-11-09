@@ -85,7 +85,11 @@ export class ImgbbService {
     // multi-megabyte phone photos on mobile links.
     const bytes = new Uint8Array(image.byteLength);
     bytes.set(image);
-    form.append('image', new Blob([bytes], { type: mimeType }), fileName ?? 'evidence');
+    form.append(
+      'image',
+      new Blob([bytes], { type: mimeType }),
+      fileName ?? 'evidence',
+    );
     if (fileName) {
       form.append('name', fileName.replace(/[^\w.-]+/g, '-').slice(0, 100));
     }

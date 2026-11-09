@@ -4,7 +4,10 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
 import { ImgbbService } from '../src/kiosk/imgbb.service';
-import { computeReceiptChecksum, verifyReceiptSignature } from '../src/kiosk/receipt';
+import {
+  computeReceiptChecksum,
+  verifyReceiptSignature,
+} from '../src/kiosk/receipt';
 
 describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
   let app: INestApplication;
@@ -39,7 +42,9 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -230,7 +235,9 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       expect(receipt.algorithm).toBe('SHA-256');
       expect(receipt.signature).toMatch(/^[0-9a-f]{64}$/);
 
-      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(true);
+      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(
+        true,
+      );
     });
 
     it('rejects negative reportedCash with HTTP 400', async () => {
@@ -272,7 +279,12 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       expect(res.body.receipt).toBeDefined();
       expect(res.body.receipt.operatorId).toBe('OP-001');
       expect(res.body.receipt.reportedCash).toBe(500);
-      expect(verifyReceiptSignature(res.body.receipt.checksum, res.body.receipt.signature)).toBe(true);
+      expect(
+        verifyReceiptSignature(
+          res.body.receipt.checksum,
+          res.body.receipt.signature,
+        ),
+      ).toBe(true);
     });
   });
 
@@ -296,7 +308,12 @@ describe('Daily Submission & Tamper-Evident Receipt E2E', () => {
       expect(res.body.receipt).toBeDefined();
       expect(res.body.receipt.operatorId).toBe('OP-002');
       expect(res.body.receipt.reportedCash).toBe(1000);
-      expect(verifyReceiptSignature(res.body.receipt.checksum, res.body.receipt.signature)).toBe(true);
+      expect(
+        verifyReceiptSignature(
+          res.body.receipt.checksum,
+          res.body.receipt.signature,
+        ),
+      ).toBe(true);
     });
   });
 });

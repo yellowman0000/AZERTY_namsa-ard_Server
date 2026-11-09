@@ -78,7 +78,9 @@ describe('checksum-validator (Story 14-2, SCRUM-23)', () => {
       const legacyHash = computePayloadChecksum(basePayload, 'legacy');
 
       expect(verifyPayloadChecksum(basePayload, `v1:${v1Hash}`)).toBe(true);
-      expect(verifyPayloadChecksum(basePayload, `legacy:${legacyHash}`)).toBe(true);
+      expect(verifyPayloadChecksum(basePayload, `legacy:${legacyHash}`)).toBe(
+        true,
+      );
     });
 
     it('is case-insensitive for hex characters', () => {

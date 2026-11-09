@@ -49,7 +49,6 @@ function createFakePrisma() {
     const t = log.recordedAt.getTime();
     if (cond.gte && t < cond.gte.getTime()) return false;
     return !(cond.lte && t > cond.lte.getTime());
-
   };
 
   return {
@@ -63,7 +62,9 @@ function createFakePrisma() {
     dailyLog: {
       findUnique: jest.fn(
         async ({ where }: { where: { transactionId: string } }) => {
-          return logs.find((l) => l.transactionId === where.transactionId) ?? null;
+          return (
+            logs.find((l) => l.transactionId === where.transactionId) ?? null
+          );
         },
       ),
       findFirst: jest.fn(
@@ -82,16 +83,22 @@ function createFakePrisma() {
           return sorted[0] ?? null;
         },
       ),
-      create: jest.fn(async ({ data }: { data: Omit<FakeLog, 'id' | 'isSynced' | 'createdAt'> }) => {
-        const log: FakeLog = {
-          id: `log-${logs.length + 1}`,
-          isSynced: true,
-          createdAt: FIXED_NOW,
-          ...data,
-        };
-        logs.push(log);
-        return log;
-      }),
+      create: jest.fn(
+        async ({
+          data,
+        }: {
+          data: Omit<FakeLog, 'id' | 'isSynced' | 'createdAt'>;
+        }) => {
+          const log: FakeLog = {
+            id: `log-${logs.length + 1}`,
+            isSynced: true,
+            createdAt: FIXED_NOW,
+            ...data,
+          };
+          logs.push(log);
+          return log;
+        },
+      ),
     },
   };
 }
@@ -146,7 +153,9 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
 
     app = moduleFixture.createNestApplication({ logger: false });
     // Same pipe configuration as src/main.ts
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -161,14 +170,19 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
       .send(body);
 
   const postJson = (body: unknown) =>
-    request(app.getHttpServer()).post(LOGS_URL).send(body as object);
+    request(app.getHttpServer())
+      .post(LOGS_URL)
+      .send(body as object);
 
   // ───────────────────────────────────────────────────────────
   // 1. Malformed JSON
   // ───────────────────────────────────────────────────────────
   describe('1. Malformed JSON body', () => {
     it.each([
-      ['truncated JSON', '{"transactionId":"TXN-1","kioskId":"KIOSK-EDGE-001","meterVol'],
+      [
+        'truncated JSON',
+        '{"transactionId":"TXN-1","kioskId":"KIOSK-EDGE-001","meterVol',
+      ],
       ['trailing comma', '{"transactionId":"TXN-1",}'],
       ['single-quoted keys/values', "{'transactionId':'TXN-1'}"],
       ['unquoted keys', '{transactionId:"TXN-1"}'],
@@ -222,7 +236,9 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     });
 
     it('rejects a body larger than the JSON size limit with HTTP 413', async () => {
-      const res = await postJson(validPayload({ padding: 'x'.repeat(200 * 1024) }));
+      const res = await postJson(
+        validPayload({ padding: 'x'.repeat(200 * 1024) }),
+      );
 
       expect(res.status).toBe(413);
       expect(prisma.dailyLog.create).not.toHaveBeenCalled();
@@ -245,10 +261,9 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     });
 
     it('ignores a __proto__ key injected into the JSON', async () => {
-      const body = JSON.stringify(validPayload({ transactionId: 'TXN-PROTO' })).replace(
-        '{',
-        '{"__proto__":{"meterVolume":-1,"isAdmin":true},',
-      );
+      const body = JSON.stringify(
+        validPayload({ transactionId: 'TXN-PROTO' }),
+      ).replace('{', '{"__proto__":{"meterVolume":-1,"isAdmin":true},');
       const res = await postRaw(body);
 
       expect(res.status).toBe(201);
@@ -308,10 +323,15 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
 
     // KNOWN GAP: @IsDateString() checks the format only, so an impossible date such as
     // Feb 30 is accepted and `new Date()` silently rolls it over to Mar 2.
-    it.failing('rejects recordedAt as an impossible calendar date (Feb 30)', async () => {
-      const res = await postJson(validPayload({ recordedAt: '2026-02-30T12:00:00.000Z' }));
-      expect(res.status).toBe(400);
-    });
+    it.failing(
+      'rejects recordedAt as an impossible calendar date (Feb 30)',
+      async () => {
+        const res = await postJson(
+          validPayload({ recordedAt: '2026-02-30T12:00:00.000Z' }),
+        );
+        expect(res.status).toBe(400);
+      },
+    );
 
     it.each([
       ['a number', 123],
@@ -351,7 +371,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
 
     it('strips unknown fields instead of persisting them', async () => {
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-EXTRA', isSynced: false, id: 'forged-id' }),
+        validPayload({
+          transactionId: 'TXN-EXTRA',
+          isSynced: false,
+          id: 'forged-id',
+        }),
       );
 
       expect(res.status).toBe(201);
@@ -361,10 +385,13 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
 
     // KNOWN GAP: @IsNotEmpty() allows whitespace, so "   " passes validation and
     // only fails later as an unknown kiosk (404) instead of a schema error (400).
-    it.failing('rejects a whitespace-only kioskId as a schema error (400)', async () => {
-      const res = await postJson(validPayload({ kioskId: '   ' }));
-      expect(res.status).toBe(400);
-    });
+    it.failing(
+      'rejects a whitespace-only kioskId as a schema error (400)',
+      async () => {
+        const res = await postJson(validPayload({ kioskId: '   ' }));
+        expect(res.status).toBe(400);
+      },
+    );
   });
 
   // ───────────────────────────────────────────────────────────
@@ -373,7 +400,10 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
   describe('3. Corrupted payload & checksum', () => {
     it('rejects a payload whose checksum does not match its fields (HTTP 422)', async () => {
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-BAD-HASH', checksum: 'f'.repeat(64) }),
+        validPayload({
+          transactionId: 'TXN-BAD-HASH',
+          checksum: 'f'.repeat(64),
+        }),
       );
       expect(res.status).toBe(422);
       expect(res.body).toMatchObject({
@@ -392,7 +422,9 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     });
 
     it('stores null when checksum is omitted', async () => {
-      const { checksum: _omit, ...noChecksum } = validPayload({ transactionId: 'TXN-NOHASH' });
+      const { checksum: _omit, ...noChecksum } = validPayload({
+        transactionId: 'TXN-NOHASH',
+      });
       const res = await postJson(noChecksum);
 
       expect(res.status).toBe(201);
@@ -406,7 +438,10 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
         meterVolume: 42.5,
         recordedAt: '2026-10-17T12:00:00.000Z',
       };
-      const legacyChecksum = computePayloadChecksum(payloadWithoutChecksum, 'legacy');
+      const legacyChecksum = computePayloadChecksum(
+        payloadWithoutChecksum,
+        'legacy',
+      );
       const res = await postJson({
         ...payloadWithoutChecksum,
         checksum: legacyChecksum,
@@ -421,8 +456,14 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
   // 4. Conflicts with server state
   // ───────────────────────────────────────────────────────────
   describe('4. Conflicts with server state', () => {
-    const seed = async (transactionId: string, meterVolume: number, recordedAt: string) => {
-      const res = await postJson(validPayload({ transactionId, meterVolume, recordedAt }));
+    const seed = async (
+      transactionId: string,
+      meterVolume: number,
+      recordedAt: string,
+    ) => {
+      const res = await postJson(
+        validPayload({ transactionId, meterVolume, recordedAt }),
+      );
       expect(res.status).toBe(201);
     };
 
@@ -442,7 +483,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('re-acknowledges an identical retry of a stored transactionId with 200 and writes nothing', async () => {
       await seed('TXN-DUP', 10, '2026-10-17T10:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-DUP', meterVolume: 10, recordedAt: '2026-10-17T10:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-DUP',
+          meterVolume: 10,
+          recordedAt: '2026-10-17T10:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(200);
@@ -459,11 +504,18 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('rejects a stored transactionId sent with a different reading (409 DUPLICATE_TRANSACTION, not a STATE_CONFLICT)', async () => {
       await seed('TXN-DUP', 10, '2026-10-17T10:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-DUP', meterVolume: 11, recordedAt: '2026-10-17T10:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-DUP',
+          meterVolume: 11,
+          recordedAt: '2026-10-17T10:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(409);
-      expect(res.body).toMatchObject({ ack: false, error: 'DUPLICATE_TRANSACTION' });
+      expect(res.body).toMatchObject({
+        ack: false,
+        error: 'DUPLICATE_TRANSACTION',
+      });
       expect(res.body.error).not.toBe(STATE_CONFLICT);
       expect(res.body.message).toContain('already exists');
       expect(prisma.logs).toHaveLength(1);
@@ -473,7 +525,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('rejects a reading lower than an older server reading (LOWER_THAN_OLDER_READING)', async () => {
       await seed('TXN-OLD', 100, '2026-10-17T10:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-LOWER', meterVolume: 50, recordedAt: '2026-10-17T11:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-LOWER',
+          meterVolume: 50,
+          recordedAt: '2026-10-17T11:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(409);
@@ -489,7 +545,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('rejects an offline reading higher than a newer server reading (HIGHER_THAN_NEWER_READING)', async () => {
       await seed('TXN-NEW', 100, '2026-10-17T12:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-HIGHER', meterVolume: 150, recordedAt: '2026-10-17T11:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-HIGHER',
+          meterVolume: 150,
+          recordedAt: '2026-10-17T11:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(409);
@@ -500,7 +560,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('rejects a different volume at the exact same recordedAt', async () => {
       await seed('TXN-SAME-1', 100, '2026-10-17T12:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-SAME-2', meterVolume: 101, recordedAt: '2026-10-17T12:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-SAME-2',
+          meterVolume: 101,
+          recordedAt: '2026-10-17T12:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(409);
@@ -510,7 +574,11 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
     it('treats the same instant in a different timezone offset as the same recordedAt', async () => {
       await seed('TXN-TZ-1', 100, '2026-10-17T12:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-TZ-2', meterVolume: 101, recordedAt: '2026-10-17T19:00:00+07:00' }),
+        validPayload({
+          transactionId: 'TXN-TZ-2',
+          meterVolume: 101,
+          recordedAt: '2026-10-17T19:00:00+07:00',
+        }),
       );
 
       expect(res.status).toBe(409);
@@ -521,11 +589,19 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
       await seed('TXN-A', 100, '2026-10-17T10:00:00.000Z');
       await seed('TXN-C', 300, '2026-10-17T12:00:00.000Z');
       const res = await postJson(
-        validPayload({ transactionId: 'TXN-B', meterVolume: 200, recordedAt: '2026-10-17T11:00:00.000Z' }),
+        validPayload({
+          transactionId: 'TXN-B',
+          meterVolume: 200,
+          recordedAt: '2026-10-17T11:00:00.000Z',
+        }),
       );
 
       expect(res.status).toBe(201);
-      expect(prisma.logs.map((l) => l.transactionId)).toEqual(['TXN-A', 'TXN-C', 'TXN-B']);
+      expect(prisma.logs.map((l) => l.transactionId)).toEqual([
+        'TXN-A',
+        'TXN-C',
+        'TXN-B',
+      ]);
     });
 
     it('does not compare readings across different kiosks', async () => {

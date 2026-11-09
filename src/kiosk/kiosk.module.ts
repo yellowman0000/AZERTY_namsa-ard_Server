@@ -8,6 +8,6 @@ import { PrismaService } from '../prisma.service';
 
 @Module({
   controllers: [KioskController, LogInspectionController],
-  providers: [KioskService, ImgbbService, LogInspectionService, PrismaService]
+  providers: [KioskService, ImgbbService, LogInspectionService, PrismaService],
 })
 export class KioskModule {}

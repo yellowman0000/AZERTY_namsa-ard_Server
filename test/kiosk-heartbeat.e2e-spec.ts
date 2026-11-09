@@ -2,8 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
-import { PrismaService } from './../src/prisma.service';
+import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma.service';
 
 // Story 01 – Integration tests: heartbeat ping → status registry → offline timeout.
 // PrismaService is replaced with an in-memory store so the tests run without a database.
@@ -62,8 +62,7 @@ const createInMemoryPrisma = () => {
         }) => {
           let count = 0;
           for (const [id, row] of kiosks.entries()) {
-            const statusMatches =
-              !where.status || row.status === where.status;
+            const statusMatches = !where.status || row.status === where.status;
             const timeMatches =
               !where.lastHeartbeat?.lt ||
               (row.lastHeartbeat && row.lastHeartbeat < where.lastHeartbeat.lt);

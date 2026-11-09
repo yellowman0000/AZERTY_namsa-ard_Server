@@ -110,7 +110,9 @@ describe('Receipt Generator & Checksum (Tamper-Evident Receipts)', () => {
       const signature = signReceiptChecksum(checksum, testSecret);
 
       expect(signature).toMatch(/^[0-9a-f]{64}$/);
-      expect(verifyReceiptSignature(checksum, signature, testSecret)).toBe(true);
+      expect(verifyReceiptSignature(checksum, signature, testSecret)).toBe(
+        true,
+      );
     });
 
     it('rejects signature if checksum or secret is tampered', () => {
@@ -123,15 +125,15 @@ describe('Receipt Generator & Checksum (Tamper-Evident Receipts)', () => {
       ).toBe(false);
 
       // Different secret
-      expect(
-        verifyReceiptSignature(checksum, signature, 'wrong-secret'),
-      ).toBe(false);
+      expect(verifyReceiptSignature(checksum, signature, 'wrong-secret')).toBe(
+        false,
+      );
 
       // Corrupted signature
       const corruptedSig = 'a' + signature.slice(1);
-      expect(
-        verifyReceiptSignature(checksum, corruptedSig, testSecret),
-      ).toBe(false);
+      expect(verifyReceiptSignature(checksum, corruptedSig, testSecret)).toBe(
+        false,
+      );
     });
   });
 
@@ -157,7 +159,9 @@ describe('Receipt Generator & Checksum (Tamper-Evident Receipts)', () => {
       expect(receipt.signedAt).toBe(receipt.issuedAt);
 
       // Verify the generated signature
-      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(true);
+      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(
+        true,
+      );
     });
   });
 });

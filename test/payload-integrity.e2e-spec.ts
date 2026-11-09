@@ -18,7 +18,9 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
 
     prisma = app.get<PrismaService>(PrismaService);
@@ -255,8 +257,12 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
       });
       expect(dbRow).not.toBeNull();
       // Verify stripped fields were not stored
-      expect((dbRow as Record<string, unknown>).maliciousAdminFlag).toBeUndefined();
-      expect((dbRow as Record<string, unknown>).extraInjectedData).toBeUndefined();
+      expect(
+        (dbRow as Record<string, unknown>).maliciousAdminFlag,
+      ).toBeUndefined();
+      expect(
+        (dbRow as Record<string, unknown>).extraInjectedData,
+      ).toBeUndefined();
     });
   });
 
@@ -310,7 +316,11 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
         .send(firstPayload)
         .expect(201);
 
-      expect(res.body).toMatchObject({ ack: true, status: 'SYNCHRONIZED', duplicate: false });
+      expect(res.body).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: false,
+      });
       firstLogId = res.body.logId;
     });
 
@@ -342,7 +352,10 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
         .send(payload)
         .expect(409);
 
-      expect(res.body).toMatchObject({ ack: false, error: 'DUPLICATE_TRANSACTION' });
+      expect(res.body).toMatchObject({
+        ack: false,
+        error: 'DUPLICATE_TRANSACTION',
+      });
       expect(res.body.message).toContain(
         `A log with transactionId "${duplicateTxn}" already exists.`,
       );

@@ -55,7 +55,9 @@ export function normalizeChecksumFields(payload: ChecksumPayload): {
     recordedAt = rawRecorded.toISOString();
   } else if (rawRecorded) {
     const parsed = new Date(rawRecorded);
-    recordedAt = isNaN(parsed.getTime()) ? String(rawRecorded).trim() : parsed.toISOString();
+    recordedAt = isNaN(parsed.getTime())
+      ? String(rawRecorded).trim()
+      : parsed.toISOString();
   } else {
     recordedAt = new Date().toISOString();
   }
@@ -151,11 +153,9 @@ export function verifyPayloadChecksum(
     reportedCash: payload.reportedCash,
     recordedAt: payload.recordedAt,
   }).toLowerCase();
-  if (cleanHash === receiptHash) {
-    return true;
-  }
+  return cleanHash === receiptHash;
 
-  return false;
+
 }
 
 /**

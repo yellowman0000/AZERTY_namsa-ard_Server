@@ -15,7 +15,12 @@ import { EvidenceStorageUnavailableError, ImgbbService } from './imgbb.service';
 describe('ImgbbService', () => {
   let server: Server;
   let uploadUrl: string;
-  let lastRequest: { url: string; contentType: string; raw: Buffer; body: string };
+  let lastRequest: {
+    url: string;
+    contentType: string;
+    raw: Buffer;
+    body: string;
+  };
   let respond: (response: ServerResponse) => void;
 
   const originalKey = process.env.IMGBB_API_KEY;
@@ -23,21 +28,25 @@ describe('ImgbbService', () => {
   const originalTimeout = process.env.IMGBB_TIMEOUT_MS;
 
   beforeAll(async () => {
-    server = createServer((request: IncomingMessage, response: ServerResponse) => {
-      const chunks: Buffer[] = [];
-      request.on('data', (chunk: Buffer) => chunks.push(chunk));
-      request.on('end', () => {
-        const raw = Buffer.concat(chunks);
-        lastRequest = {
-          url: request.url ?? '',
-          contentType: String(request.headers['content-type'] ?? ''),
-          raw,
-          body: raw.toString('utf8'),
-        };
-        respond(response);
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    server = createServer(
+      (request: IncomingMessage, response: ServerResponse) => {
+        const chunks: Buffer[] = [];
+        request.on('data', (chunk: Buffer) => chunks.push(chunk));
+        request.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          lastRequest = {
+            url: request.url ?? '',
+            contentType: String(request.headers['content-type'] ?? ''),
+            raw,
+            body: raw.toString('utf8'),
+          };
+          respond(response);
+        });
+      },
+    );
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
     const { port } = server.address() as AddressInfo;
     uploadUrl = `http://127.0.0.1:${port}/1/upload`;
   });
@@ -103,9 +112,9 @@ describe('ImgbbService', () => {
   it('throws a storage error when no API key is configured', async () => {
     delete process.env.IMGBB_API_KEY;
 
-    await expect(new ImgbbService().upload(Buffer.from([0xff]))).rejects.toThrow(
-      EvidenceStorageUnavailableError,
-    );
+    await expect(
+      new ImgbbService().upload(Buffer.from([0xff])),
+    ).rejects.toThrow(EvidenceStorageUnavailableError);
   });
 
   it('surfaces the imgBB error message when the key is rejected', async () => {
@@ -133,20 +142,20 @@ describe('ImgbbService', () => {
   it('throws when imgBB returns an unreadable body', async () => {
     respond = (response) => {
       response.writeHead(502);
-      response.end('<html>bad gateway</html>');
+      response.end('<html lang="en">bad gateway</html>');
     };
 
-    await expect(new ImgbbService().upload(Buffer.from([0xff]))).rejects.toThrow(
-      /unreadable response/,
-    );
+    await expect(
+      new ImgbbService().upload(Buffer.from([0xff])),
+    ).rejects.toThrow(/unreadable response/);
   });
 
   it('throws when imgBB cannot be reached', async () => {
     process.env.IMGBB_UPLOAD_URL = 'http://127.0.0.1:1/1/upload';
 
-    await expect(new ImgbbService().upload(Buffer.from([0xff]))).rejects.toThrow(
-      /Could not reach imgBB/,
-    );
+    await expect(
+      new ImgbbService().upload(Buffer.from([0xff])),
+    ).rejects.toThrow(/Could not reach imgBB/);
   });
 
   it('honours IMGBB_TIMEOUT_MS when imgBB is too slow', async () => {
@@ -164,8 +173,8 @@ describe('ImgbbService', () => {
       }, 400);
     };
 
-    await expect(new ImgbbService().upload(Buffer.from([0xff]))).rejects.toThrow(
-      /Could not reach imgBB/,
-    );
+    await expect(
+      new ImgbbService().upload(Buffer.from([0xff])),
+    ).rejects.toThrow(/Could not reach imgBB/);
   });
 });

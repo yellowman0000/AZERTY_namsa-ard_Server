@@ -121,10 +121,14 @@ async function runBenchmark(totalRequests = 100, concurrency = 10) {
 
     // 3. Payload Integrity & Database Verification
     console.log('--- DATABASE INTEGRITY VERIFICATION ---');
-    const dbCount = await prisma.dailyLog.count({ where: { kioskId: KIOSK_ID } });
+    const dbCount = await prisma.dailyLog.count({
+      where: { kioskId: KIOSK_ID },
+    });
     console.log(`Expected DB Writes : ${totalRequests}`);
     console.log(`Confirmed DB Rows  : ${dbCount}`);
-    console.log(`Data Loss Rate     : ${dbCount === totalRequests ? '0.00% (PERFECT MATCH)' : 'MISMATCH'}`);
+    console.log(
+      `Data Loss Rate     : ${dbCount === totalRequests ? '0.00% (PERFECT MATCH)' : 'MISMATCH'}`,
+    );
 
     // Verify sample records for precision and checksum fidelity
     const sample = await prisma.dailyLog.findFirst({

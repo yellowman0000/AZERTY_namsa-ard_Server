@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   Param,
   Query,
@@ -15,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
+import { MarkSeenDto } from './dto/mark-seen.dto';
 
 const MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_EVIDENCE_TYPES = new Set([
@@ -67,13 +69,26 @@ export class KioskController {
   async uploadEvidence(
     @Param('transactionId') transactionId: string,
     @UploadedFile()
-    file: { buffer: Buffer; mimetype: string; originalname: string } | undefined,
+    file:
+      { buffer: Buffer; mimetype: string; originalname: string } | undefined,
   ) {
     if (!file) {
-      throw new BadRequestException('Attach an image file in the "file" field.');
+      throw new BadRequestException(
+        'Attach an image file in the "file" field.',
+      );
     }
 
     return this.kioskService.uploadEvidence(transactionId, file);
+  }
+
+  // ───────────────────────────────────────────────────────────
+  //  Story 08 – Mark unseen logs as seen by Operation Manager
+  //  PATCH /api/kiosk/logs/mark-seen
+  // ───────────────────────────────────────────────────────────
+
+  @Patch(['logs/mark-seen', 'mark-seen'])
+  async markSeen(@Body() dto?: MarkSeenDto) {
+    return this.kioskService.markLogsAsSeen(dto);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -130,7 +145,7 @@ export class KioskController {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException(
-        `${name} must be a valid ISO-8601 date (e.g. 2026-11-01)`,
+        `${name} must be a valid ISO-8601 date string (e.g. 2026-11-01)`,
       );
     }
 

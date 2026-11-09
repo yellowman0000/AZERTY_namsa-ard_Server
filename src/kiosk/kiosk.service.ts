@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ImgbbService, EvidenceStorageUnavailableError } from './imgbb.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
+import { MarkSeenDto } from './dto/mark-seen.dto';
 import {
   findMeterConflict,
   toStateConflictException,
@@ -49,7 +50,9 @@ const EVIDENCE_FILE_TYPES = {
     extension: 'png',
     matches: (buffer: Buffer) =>
       buffer.length >= 8 &&
-      buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      buffer
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
   },
   'image/webp': {
     extension: 'webp',
@@ -111,13 +114,17 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     file: EvidenceUploadFile,
   ): Promise<{ proofImageUrl: string }> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(transactionId)) {
-      throw new BadRequestException('Invalid transactionId for evidence upload.');
+      throw new BadRequestException(
+        'Invalid transactionId for evidence upload.',
+      );
     }
     if (file.buffer.length === 0) {
       throw new BadRequestException('Evidence image is empty.');
     }
     if (file.buffer.length > MAX_EVIDENCE_FILE_SIZE) {
-      throw new PayloadTooLargeException('Evidence image must be 5 MB or smaller.');
+      throw new PayloadTooLargeException(
+        'Evidence image must be 5 MB or smaller.',
+      );
     }
 
     const imageType =
@@ -269,8 +276,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 4. Story 14-2 – reject readings that conflict with server state
-    const readingType: ReadingTypeDto =
-      dto.readingType ?? 'CUMULATIVE_METER';
+    const readingType: ReadingTypeDto = dto.readingType ?? 'CUMULATIVE_METER';
     const conflict =
       readingType === 'DAILY_VOLUME'
         ? null
@@ -283,10 +289,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
       throw toStateConflictException(incoming, conflict);
     }
 
-    if (
-      dto.proofImageUrl &&
-      !isAcceptableProofImageUrl(dto.proofImageUrl)
-    ) {
+    if (dto.proofImageUrl && !isAcceptableProofImageUrl(dto.proofImageUrl)) {
       throw new BadRequestException(
         'proofImageUrl must be an imgBB image URL returned by the evidence upload endpoint.',
       );
@@ -493,6 +496,86 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
         createdAt: true,
       },
       orderBy: { recordedAt: 'desc' },
+    });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  //  Story 08 – Unseen-records tracking state per Operation Manager
+  //  Used by PATCH /api/kiosk/logs/mark-seen
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Mark daily log records as seen by an Operation Manager.
+   * Supports:
+   * - Marking specific logs by IDs (`logIds`, `ids`, `logId`, or `id`)
+   * - Marking all logs for a specific `kioskId`
+   * - Marking logs up to a timestamp `upTo`
+   * - Marking all unseen logs if no criteria given
+   */
+  async markLogsAsSeen(dto?: MarkSeenDto): Promise<{
+    success: boolean;
+    count: number;
+    markedCount: number;
+    updated: number;
+  }> {
+    if (!this.prisma?.dailyLog?.updateMany) {
+      return { success: true, count: 0, markedCount: 0, updated: 0 };
+    }
+
+    const targetIds: string[] = [
+      ...(dto?.logIds ?? []),
+      ...(dto?.ids ?? []),
+      ...(dto?.logId ? [dto.logId] : []),
+      ...(dto?.id ? [dto.id] : []),
+    ].filter(Boolean);
+
+    const where: any = {
+      isReadByManager: false,
+    };
+
+    if (targetIds.length > 0) {
+      where.id = { in: targetIds };
+    }
+    if (dto?.kioskId) {
+      where.kioskId = dto.kioskId;
+    }
+    if (dto?.upTo) {
+      where.recordedAt = { lte: new Date(dto.upTo) };
+    }
+
+    const result = await this.prisma.dailyLog.updateMany({
+      where,
+      data: {
+        isReadByManager: true,
+      },
+    });
+
+    this.logger.log(
+      `Marked ${result.count} daily log(s) as seen by Operation Manager`,
+    );
+
+    return {
+      success: true,
+      count: result.count,
+      markedCount: result.count,
+      updated: result.count,
+    };
+  }
+
+  async markSeen(dto?: MarkSeenDto) {
+    return this.markLogsAsSeen(dto);
+  }
+
+  /**
+   * Count unread/unseen logs for Operation Manager.
+   */
+  async countUnseenLogs(kioskId?: string): Promise<number> {
+    if (typeof this.prisma?.dailyLog?.count !== 'function') return 0;
+    return this.prisma.dailyLog.count({
+      where: {
+        ...(kioskId ? { kioskId } : {}),
+        isReadByManager: false,
+      },
     });
   }
 }

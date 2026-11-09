@@ -67,13 +67,20 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
   };
 
   const dbLogs = (kioskId: string) =>
-    prisma.dailyLog.findMany({ where: { kioskId }, orderBy: { recordedAt: 'asc' } });
+    prisma.dailyLog.findMany({
+      where: { kioskId },
+      orderBy: { recordedAt: 'asc' },
+    });
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const cleanDb = async () => {
-    await prisma.dailyLog.deleteMany({ where: { kioskId: { startsWith: KIOSK_PREFIX } } });
-    await prisma.kiosk.deleteMany({ where: { id: { startsWith: KIOSK_PREFIX } } });
+    await prisma.dailyLog.deleteMany({
+      where: { kioskId: { startsWith: KIOSK_PREFIX } },
+    });
+    await prisma.kiosk.deleteMany({
+      where: { id: { startsWith: KIOSK_PREFIX } },
+    });
   };
 
   beforeAll(async () => {
@@ -82,7 +89,9 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication({ logger: ['error'] });
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.listen(0, '127.0.0.1');
     prisma = app.get(PrismaService);
 
@@ -164,7 +173,9 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
       expect(entry.server_log_id).toBe(row!.id);
       expect(entry.synced_at).toBe(row!.createdAt.toISOString());
     }
-    expect(kiosk.events.filter((e) => e.type === 'ack').map((e) => e.detail)).toEqual([
+    expect(
+      kiosk.events.filter((e) => e.type === 'ack').map((e) => e.detail),
+    ).toEqual([
       'pending=2 synced=1',
       'pending=1 synced=2',
       'pending=0 synced=3',
@@ -242,12 +253,21 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
 
     cutNetwork(kiosk);
     const recs = [];
-    for (const v of [50, 60, 70]) recs.push((await kiosk.submitReading(v)).record);
+    for (const v of [50, 60, 70])
+      recs.push((await kiosk.submitReading(v)).record);
 
     // First and third uploads: server commits, then the link eats the response
     network.injectFaults(
-      { kind: 'drop-response', pathIncludes: '/logs', transactionId: recs[0].transaction_id },
-      { kind: 'drop-response', pathIncludes: '/logs', transactionId: recs[2].transaction_id },
+      {
+        kind: 'drop-response',
+        pathIncludes: '/logs',
+        transactionId: recs[0].transaction_id,
+      },
+      {
+        kind: 'drop-response',
+        pathIncludes: '/logs',
+        transactionId: recs[2].transaction_id,
+      },
     );
 
     restoreNetwork(kiosk);
@@ -256,10 +276,14 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     const rows = await dbLogs(kiosk.kioskId);
     expect(rows).toHaveLength(3);
     for (const rec of recs) {
-      expect(rows.filter((r) => r.transactionId === rec.transaction_id)).toHaveLength(1);
+      expect(
+        rows.filter((r) => r.transactionId === rec.transaction_id),
+      ).toHaveLength(1);
     }
     expect(network.stats.droppedResponses).toBe(2);
-    expect(kiosk.events.filter((e) => e.type === 'duplicate-ack')).toHaveLength(2);
+    expect(kiosk.events.filter((e) => e.type === 'duplicate-ack')).toHaveLength(
+      2,
+    );
     // The retried uploads were answered 200 (already stored), not 201 or 409
     const reAcked = network.forwardedLogs().filter((r) => r.status === 200);
     expect(reAcked.map((r) => r.transactionId)).toEqual([
@@ -280,7 +304,8 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
 
     cutNetwork(kiosk);
     const recs = [];
-    for (let i = 1; i <= 6; i++) recs.push((await kiosk.submitReading(i * 10)).record);
+    for (let i = 1; i <= 6; i++)
+      recs.push((await kiosk.submitReading(i * 10)).record);
 
     // Slow link so the flaps land while requests are in flight
     network.setFlakyProfile({ latencyMs: [120, 250], seed: 42 });
@@ -298,7 +323,9 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     await kiosk.waitUntilSynced(25_000);
 
     const rows = await dbLogs(kiosk.kioskId);
-    expect(rows.map((r) => r.transactionId)).toEqual(recs.map((r) => r.transaction_id));
+    expect(rows.map((r) => r.transactionId)).toEqual(
+      recs.map((r) => r.transaction_id),
+    );
     expect(kiosk.pendingCount).toBe(0);
   }, 45_000);
 
@@ -311,7 +338,8 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
 
     cutNetwork(kiosk);
     const recs = [];
-    for (let i = 1; i <= 5; i++) recs.push((await kiosk.submitReading(i * 1.5)).record);
+    for (let i = 1; i <= 5; i++)
+      recs.push((await kiosk.submitReading(i * 1.5)).record);
 
     network.setFlakyProfile({
       dropRequestRate: 0.25,
@@ -328,7 +356,9 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     const rows = await dbLogs(kiosk.kioskId);
     expect(rows).toHaveLength(5);
     expect(new Set(rows.map((r) => r.transactionId)).size).toBe(5);
-    expect(rows.map((r) => r.transactionId)).toEqual(recs.map((r) => r.transaction_id));
+    expect(rows.map((r) => r.transactionId)).toEqual(
+      recs.map((r) => r.transaction_id),
+    );
 
     const faults =
       network.stats.droppedRequests +
@@ -371,7 +401,8 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
 
     cutNetwork(kiosk);
     const recs = [];
-    for (const v of [11, 22, 33]) recs.push((await kiosk.submitReading(v)).record);
+    for (const v of [11, 22, 33])
+      recs.push((await kiosk.submitReading(v)).record);
 
     // Someone edits localStorage: middle record's volume changed, checksum left as-is
     const raw = new StorageBackedQueue(storage);
@@ -426,7 +457,9 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     expect(retry?.detail).toContain('HTTP 200 without server ACK');
 
     const rows = await dbLogs(kiosk.kioskId);
-    expect(rows.map((r) => r.transactionId)).toEqual(recs.map((r) => r.transaction_id));
+    expect(rows.map((r) => r.transactionId)).toEqual(
+      recs.map((r) => r.transaction_id),
+    );
     expect(kiosk.synced.peekAll().map((r) => r.transaction_id)).toEqual(
       recs.map((r) => r.transaction_id),
     );
@@ -460,6 +493,8 @@ describe('Story 14-3 – Offline auto-sync E2E under unstable network', () => {
     expect(kiosk.syncedCount).toBe(0);
     const quarantined = kiosk.quarantine.peekAll();
     expect(quarantined).toHaveLength(1);
-    expect(quarantined[0].quarantine_reason).toBe('HTTP 409 DUPLICATE_TRANSACTION');
+    expect(quarantined[0].quarantine_reason).toBe(
+      'HTTP 409 DUPLICATE_TRANSACTION',
+    );
   }, 30_000);
 });

@@ -109,7 +109,6 @@ describe('KioskService evidence storage (imgBB)', () => {
       }),
     ).rejects.toThrow(ServiceUnavailableException);
   });
-
 });
 
 describe('proofImageUrl validation', () => {

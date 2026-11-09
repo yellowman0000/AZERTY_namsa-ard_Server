@@ -141,7 +141,9 @@ describe('meter-conflict (Story 14-2)', () => {
         ack: false,
         error: STATE_CONFLICT,
         reason: 'HIGHER_THAN_NEWER_READING',
-        message: expect.stringContaining('is higher than newer server reading 80'),
+        message: expect.stringContaining(
+          'is higher than newer server reading 80',
+        ),
         conflictingRecord,
       });
     });
@@ -159,7 +161,9 @@ describe('meter-conflict (Story 14-2)', () => {
       });
 
       const response = exception.getResponse() as Record<string, unknown>;
-      expect(response.message).toContain('is lower than older server reading 120');
+      expect(response.message).toContain(
+        'is lower than older server reading 120',
+      );
       expect(response.reason).toBe('LOWER_THAN_OLDER_READING');
     });
   });

@@ -27,7 +27,8 @@ import type { AddressInfo, Socket } from 'net';
 
 export type NetworkMode = 'online' | 'offline' | 'blackhole';
 
-export type FaultKind = 'drop-request' | 'drop-response' | 'server-error' | 'fake-ok';
+export type FaultKind =
+  'drop-request' | 'drop-response' | 'server-error' | 'fake-ok';
 
 export interface FlakyProfile {
   /** Probability (0–1) that a request is reset before reaching the server. */
@@ -194,8 +195,8 @@ export class NetworkSimulator {
   private pickFault(path: string, transactionId?: string): FaultKind | null {
     const idx = this.faultQueue.findIndex((f) => {
       if (f.pathIncludes && !path.includes(f.pathIncludes)) return false;
-      if (f.transactionId && f.transactionId !== transactionId) return false;
-      return true;
+      return !(f.transactionId && f.transactionId !== transactionId);
+
     });
     if (idx >= 0) return this.faultQueue.splice(idx, 1)[0].kind;
 
@@ -240,8 +241,12 @@ export class NetworkSimulator {
 
     let transactionId: string | undefined;
     try {
-      const parsed = JSON.parse(body.toString() || '{}') as Record<string, unknown>;
-      transactionId = (parsed.transactionId ?? parsed.transaction_id) as string | undefined;
+      const parsed = JSON.parse(body.toString() || '{}') as Record<
+        string,
+        unknown
+      >;
+      transactionId = (parsed.transactionId ?? parsed.transaction_id) as
+        string | undefined;
     } catch {
       /* not JSON – fine */
     }
@@ -256,13 +261,15 @@ export class NetworkSimulator {
     if (fault === 'server-error') {
       this.stats.injectedServerErrors++;
       res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ statusCode: 503, message: 'Simulated gateway error' }));
+      res.end(
+        JSON.stringify({ statusCode: 503, message: 'Simulated gateway error' }),
+      );
       return;
     }
     if (fault === 'fake-ok') {
       this.stats.fakeOkResponses++;
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<html><body>Sign in to continue using Wi-Fi</body></html>');
+      res.end('<html lang="en"><body>Sign in to continue using Wi-Fi</body></html>');
       return;
     }
 
@@ -299,9 +306,16 @@ export class NetworkSimulator {
     req: http.IncomingMessage,
     path: string,
     body: Buffer,
-  ): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }> {
+  ): Promise<{
+    status: number;
+    headers: http.IncomingHttpHeaders;
+    body: Buffer;
+  }> {
     return new Promise((resolve, reject) => {
-      const headers = { ...req.headers, host: `${this.upstream.host}:${this.upstream.port}` };
+      const headers = {
+        ...req.headers,
+        host: `${this.upstream.host}:${this.upstream.port}`,
+      };
       delete headers.connection;
       const upstreamReq = http.request(
         {

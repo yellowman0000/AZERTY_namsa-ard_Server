@@ -189,7 +189,9 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
 
     app = moduleFixture.createNestApplication();
     // Same pipe options as main.ts
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -220,7 +222,11 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
 
       const res = await submit({ ...ORIGINAL, checksum }).expect(201);
 
-      expect(res.body).toMatchObject({ ack: true, status: 'SYNCHRONIZED', duplicate: false });
+      expect(res.body).toMatchObject({
+        ack: true,
+        status: 'SYNCHRONIZED',
+        duplicate: false,
+      });
       expect(prisma.logs).toHaveLength(1);
       expect(prisma.logs[0].checksum).toBe(checksum);
       expect(prisma.logs[0].meterVolume).toBe(ORIGINAL.meterVolume);
@@ -232,17 +238,26 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
     });
 
     it('accepts a v1 checksum with an explicit "v1:" version prefix', async () => {
-      await submit({ ...ORIGINAL, checksum: `v1:${v1ChecksumOf(ORIGINAL)}` }).expect(201);
+      await submit({
+        ...ORIGINAL,
+        checksum: `v1:${v1ChecksumOf(ORIGINAL)}`,
+      }).expect(201);
       expect(prisma.logs).toHaveLength(1);
     });
 
     it('accepts a receipt-format checksum covering operatorId and reportedCash', async () => {
-      await submit({ ...ORIGINAL, checksum: receiptChecksumOf(ORIGINAL) }).expect(201);
+      await submit({
+        ...ORIGINAL,
+        checksum: receiptChecksumOf(ORIGINAL),
+      }).expect(201);
       expect(prisma.logs).toHaveLength(1);
     });
 
     it('treats the checksum hex as case-insensitive', async () => {
-      await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL).toUpperCase() }).expect(201);
+      await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL).toUpperCase(),
+      }).expect(201);
       expect(prisma.logs).toHaveLength(1);
     });
 
@@ -250,7 +265,11 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       // Checksum computed over "...10:00:00.000Z", sent as "...10:00:00Z" – same instant.
       const checksum = v1ChecksumOf(ORIGINAL);
 
-      await submit({ ...ORIGINAL, recordedAt: '2026-11-04T10:00:00Z', checksum }).expect(201);
+      await submit({
+        ...ORIGINAL,
+        recordedAt: '2026-11-04T10:00:00Z',
+        checksum,
+      }).expect(201);
       expect(prisma.logs).toHaveLength(1);
     });
   });
@@ -264,48 +283,69 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       ['meterVolume changed by 0.01 L', { meterVolume: 150.76 }],
       ['meterVolume lowered', { meterVolume: 100 }],
       ['kioskId swapped', { kioskId: 'KIOSK-PROOF-002' }],
-      ['recordedAt shifted by 1 second', { recordedAt: '2026-11-04T10:00:01.000Z' }],
-      ['recordedAt moved to another day', { recordedAt: '2026-11-03T10:00:00.000Z' }],
+      [
+        'recordedAt shifted by 1 second',
+        { recordedAt: '2026-11-04T10:00:01.000Z' },
+      ],
+      [
+        'recordedAt moved to another day',
+        { recordedAt: '2026-11-03T10:00:00.000Z' },
+      ],
       ['transactionId replaced', { transactionId: 'TXN-PROOF-999' }],
-    ])('rejects a v1-checksummed entry with %s (422 CORRUPTED_PAYLOAD, nothing stored)', async (_label, change) => {
-      const checksum = v1ChecksumOf(ORIGINAL);
+    ])(
+      'rejects a v1-checksummed entry with %s (422 CORRUPTED_PAYLOAD, nothing stored)',
+      async (_label, change) => {
+        const checksum = v1ChecksumOf(ORIGINAL);
 
-      const res = await submit({ ...ORIGINAL, ...change, checksum });
+        const res = await submit({ ...ORIGINAL, ...change, checksum });
 
-      expectCorruptedPayloadRejection(res);
-    });
+        expectCorruptedPayloadRejection(res);
+      },
+    );
 
     it.each<[string, Partial<DailyLogPayload>]>([
       ['reportedCash changed', { reportedCash: 245 }],
       ['reportedCash set to zero', { reportedCash: 0 }],
       ['operatorId swapped', { operatorId: 'OP-099' }],
       ['meterVolume inflated', { meterVolume: 1500.75 }],
-    ])('rejects a receipt-checksummed entry with %s (422 CORRUPTED_PAYLOAD, nothing stored)', async (_label, change) => {
-      const checksum = receiptChecksumOf(ORIGINAL);
+    ])(
+      'rejects a receipt-checksummed entry with %s (422 CORRUPTED_PAYLOAD, nothing stored)',
+      async (_label, change) => {
+        const checksum = receiptChecksumOf(ORIGINAL);
 
-      const res = await submit({ ...ORIGINAL, ...change, checksum });
+        const res = await submit({ ...ORIGINAL, ...change, checksum });
 
-      expectCorruptedPayloadRejection(res);
-    });
+        expectCorruptedPayloadRejection(res);
+      },
+    );
 
     // KNOWN GAP: the v1 checksum covers kioskId, meterVolume, recordedAt and
     // transactionId only, so changing reportedCash on a v1-checksummed entry
     // is not detected and the entry is accepted (201).
-    it.failing('rejects a v1-checksummed entry whose reportedCash was changed', async () => {
-      const checksum = v1ChecksumOf(ORIGINAL);
+    it.failing(
+      'rejects a v1-checksummed entry whose reportedCash was changed',
+      async () => {
+        const checksum = v1ChecksumOf(ORIGINAL);
 
-      const res = await submit({ ...ORIGINAL, reportedCash: 1, checksum });
+        const res = await submit({ ...ORIGINAL, reportedCash: 1, checksum });
 
-      expect(res.status).toBe(422);
-    });
+        expect(res.status).toBe(422);
+      },
+    );
   });
 
   describe('tamper detection: checksum value itself modified', () => {
     it.each<[string, string]>([
       ['one hex character flipped', flipLastHexChar(v1ChecksumOf(ORIGINAL))],
       ['truncated', v1ChecksumOf(ORIGINAL).slice(0, 32)],
-      ['wrong version prefix ("legacy:" on a v1 hash)', `legacy:${v1ChecksumOf(ORIGINAL)}`],
-      ['checksum of a different entry', v1ChecksumOf({ ...ORIGINAL, meterVolume: 1 })],
+      [
+        'wrong version prefix ("legacy:" on a v1 hash)',
+        `legacy:${v1ChecksumOf(ORIGINAL)}`,
+      ],
+      [
+        'checksum of a different entry',
+        v1ChecksumOf({ ...ORIGINAL, meterVolume: 1 }),
+      ],
       ['non-hex garbage', 'not-a-real-checksum'],
       ['empty string', ''],
     ])('rejects an entry whose checksum is %s', async (_label, checksum) => {
@@ -320,8 +360,14 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
   // ─────────────────────────────────────────────────────────
   describe('tamper detection: stored log entry modified in the database', () => {
     const storeOriginal = async () => {
-      const res = await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL) }).expect(201);
-      return { row: prisma.logs[0], receipt: res.body.receipt as SignedReceipt };
+      const res = await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL),
+      }).expect(201);
+      return {
+        row: prisma.logs[0],
+        receipt: res.body.receipt as SignedReceipt,
+      };
     };
 
     const rowVerifies = (row: FakeLog) =>
@@ -343,21 +389,33 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
 
     it.each<[string, (row: FakeLog) => void]>([
       ['meterVolume edited', (row) => (row.meterVolume = 999.99)],
-      ['recordedAt edited', (row) => (row.recordedAt = new Date('2026-11-04T09:00:00.000Z'))],
+      [
+        'recordedAt edited',
+        (row) => (row.recordedAt = new Date('2026-11-04T09:00:00.000Z')),
+      ],
       ['kioskId edited', (row) => (row.kioskId = 'KIOSK-PROOF-002')],
-      ['stored checksum overwritten', (row) => (row.checksum = flipLastHexChar(row.checksum ?? ''))],
-    ])('detects a stored row with %s via checksum recomputation', async (_label, tamper) => {
-      const { row } = await storeOriginal();
+      [
+        'stored checksum overwritten',
+        (row) => (row.checksum = flipLastHexChar(row.checksum ?? '')),
+      ],
+    ])(
+      'detects a stored row with %s via checksum recomputation',
+      async (_label, tamper) => {
+        const { row } = await storeOriginal();
 
-      tamper(row);
+        tamper(row);
 
-      expect(rowVerifies(row)).toBe(false);
-    });
+        expect(rowVerifies(row)).toBe(false);
+      },
+    );
 
     it('re-acknowledges an untouched stored entry with the same receipt checksum and signature', async () => {
       const { receipt } = await storeOriginal();
 
-      const retry = await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL) }).expect(200);
+      const retry = await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL),
+      }).expect(200);
 
       expect(retry.body).toMatchObject({ ack: true, duplicate: true });
       expect(retry.body.receipt.checksum).toBe(receipt.checksum);
@@ -369,10 +427,16 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       const { row } = await storeOriginal();
       row.meterVolume = 999.99;
 
-      const retry = await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL) });
+      const retry = await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL),
+      });
 
       expect(retry.status).toBe(409);
-      expect(retry.body).toMatchObject({ ack: false, error: DUPLICATE_TRANSACTION });
+      expect(retry.body).toMatchObject({
+        ack: false,
+        error: DUPLICATE_TRANSACTION,
+      });
       expect(prisma.logs).toHaveLength(1);
     });
 
@@ -380,10 +444,16 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       const { row } = await storeOriginal();
       row.recordedAt = new Date('2026-11-04T09:00:00.000Z');
 
-      const retry = await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL) });
+      const retry = await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL),
+      });
 
       expect(retry.status).toBe(409);
-      expect(retry.body).toMatchObject({ ack: false, error: DUPLICATE_TRANSACTION });
+      expect(retry.body).toMatchObject({
+        ack: false,
+        error: DUPLICATE_TRANSACTION,
+      });
     });
 
     it('the original receipt no longer matches a stored row whose meterVolume was edited', async () => {
@@ -399,7 +469,9 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       });
 
       expect(checksumFromRow).not.toBe(receipt.checksum);
-      expect(verifyReceiptSignature(checksumFromRow, receipt.signature)).toBe(false);
+      expect(verifyReceiptSignature(checksumFromRow, receipt.signature)).toBe(
+        false,
+      );
     });
   });
 
@@ -408,7 +480,10 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
   // ─────────────────────────────────────────────────────────
   describe('tamper detection: signed receipt modified after it was issued', () => {
     const issueReceipt = async (): Promise<SignedReceipt> => {
-      const res = await submit({ ...ORIGINAL, checksum: v1ChecksumOf(ORIGINAL) }).expect(201);
+      const res = await submit({
+        ...ORIGINAL,
+        checksum: v1ChecksumOf(ORIGINAL),
+      }).expect(201);
       return res.body.receipt as SignedReceipt;
     };
 
@@ -422,11 +497,16 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       ['operatorId', { operatorId: 'OP-099' }],
       ['kioskId', { kioskId: 'KIOSK-PROOF-002' }],
       ['recordedAt', { recordedAt: '2026-11-03T10:00:00.000Z' }],
-    ])('detects a receipt with a modified %s (CHECKSUM_MISMATCH)', async (_label, change) => {
-      const receipt = await issueReceipt();
+    ])(
+      'detects a receipt with a modified %s (CHECKSUM_MISMATCH)',
+      async (_label, change) => {
+        const receipt = await issueReceipt();
 
-      expect(verifyReceipt({ ...receipt, ...change })).toBe('CHECKSUM_MISMATCH');
-    });
+        expect(verifyReceipt({ ...receipt, ...change })).toBe(
+          'CHECKSUM_MISMATCH',
+        );
+      },
+    );
 
     it('detects a receipt whose fields and checksum were both rewritten (signature no longer matches)', async () => {
       const receipt = await issueReceipt();
@@ -441,7 +521,10 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       const receipt = await issueReceipt();
       const forged = { ...receipt, reportedCash: 245 };
       forged.checksum = computeReceiptChecksum(forged);
-      forged.signature = signReceiptChecksum(forged.checksum, 'attacker-guessed-key');
+      forged.signature = signReceiptChecksum(
+        forged.checksum,
+        'attacker-guessed-key',
+      );
 
       expect(verifyReceipt(forged)).toBe('BAD_SIGNATURE');
     });
@@ -451,10 +534,15 @@ describe('Legal volume proving – checksum validation & tamper detection (Story
       ['truncated', (sig) => sig.slice(0, 32)],
       ['replaced with non-hex text', () => 'forged-signature'],
       ['empty', () => ''],
-    ])('detects a receipt whose signature is %s (BAD_SIGNATURE)', async (_label, alter) => {
-      const receipt = await issueReceipt();
+    ])(
+      'detects a receipt whose signature is %s (BAD_SIGNATURE)',
+      async (_label, alter) => {
+        const receipt = await issueReceipt();
 
-      expect(verifyReceipt({ ...receipt, signature: alter(receipt.signature) })).toBe('BAD_SIGNATURE');
-    });
+        expect(
+          verifyReceipt({ ...receipt, signature: alter(receipt.signature) }),
+        ).toBe('BAD_SIGNATURE');
+      },
+    );
   });
 });

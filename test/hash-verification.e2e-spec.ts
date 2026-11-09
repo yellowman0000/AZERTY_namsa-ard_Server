@@ -132,7 +132,10 @@ function createFakePrisma() {
         async ({
           data,
         }: {
-          data: Omit<FakeLog, 'id' | 'isSynced' | 'isReadByManager' | 'createdAt'>;
+          data: Omit<
+            FakeLog,
+            'id' | 'isSynced' | 'isReadByManager' | 'createdAt'
+          >;
         }) => {
           const log: FakeLog = {
             id: `log-${String(logs.length + 1).padStart(3, '0')}`,
@@ -259,7 +262,9 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
   };
 
   const inspect = async (logId: string) => {
-    const res = await http().get(`/api/kiosk/logs/${logId}/inspect`).expect(200);
+    const res = await http()
+      .get(`/api/kiosk/logs/${logId}/inspect`)
+      .expect(200);
     return res.body.verification as {
       status: string;
       format: string | null;
@@ -280,11 +285,36 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
   describe('valid submissions generate matching hashes', () => {
     it.each<[string, string, string, string]>([
       ['v1 (unprefixed)', v1Hash(SUBMISSION), 'v1', v1Hash(SUBMISSION)],
-      ['v1 ("v1:" prefix)', `v1:${v1Hash(SUBMISSION)}`, 'v1', v1Hash(SUBMISSION)],
-      ['v1 (uppercase hex)', v1Hash(SUBMISSION).toUpperCase(), 'v1', v1Hash(SUBMISSION)],
-      ['legacy (unprefixed)', legacyHash(SUBMISSION), 'legacy', legacyHash(SUBMISSION)],
-      ['legacy ("legacy:" prefix)', `legacy:${legacyHash(SUBMISSION)}`, 'legacy', legacyHash(SUBMISSION)],
-      ['receipt format', receiptHash(SUBMISSION), 'receipt', receiptHash(SUBMISSION)],
+      [
+        'v1 ("v1:" prefix)',
+        `v1:${v1Hash(SUBMISSION)}`,
+        'v1',
+        v1Hash(SUBMISSION),
+      ],
+      [
+        'v1 (uppercase hex)',
+        v1Hash(SUBMISSION).toUpperCase(),
+        'v1',
+        v1Hash(SUBMISSION),
+      ],
+      [
+        'legacy (unprefixed)',
+        legacyHash(SUBMISSION),
+        'legacy',
+        legacyHash(SUBMISSION),
+      ],
+      [
+        'legacy ("legacy:" prefix)',
+        `legacy:${legacyHash(SUBMISSION)}`,
+        'legacy',
+        legacyHash(SUBMISSION),
+      ],
+      [
+        'receipt format',
+        receiptHash(SUBMISSION),
+        'receipt',
+        receiptHash(SUBMISSION),
+      ],
     ])(
       'a %s checksum is stored as sent and verified on inspection',
       async (_label, sent, expectedFormat, expectedHash) => {
@@ -307,7 +337,9 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
 
       expect(receipt.checksum).toBe(receiptHash(SUBMISSION));
       expect(receipt.checksum).toBe(receiptHashOfRow(rowOf(logId)));
-      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(true);
+      expect(verifyReceiptSignature(receipt.checksum, receipt.signature)).toBe(
+        true,
+      );
     });
 
     it('produces the same recomputed hash on every inspection (deterministic)', async () => {
@@ -354,22 +386,34 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
     // KNOWN GAP: a receipt-format checksum sent without reportedCash hashes it
     // as "" at submission, but the row stores reportedCash = 0, so inspection
     // recomputes with "0" and flags a genuine log as CHECKSUM_MISMATCH.
-    it.failing('verifies a genuine receipt-format log submitted without reportedCash', async () => {
-      const withoutCash: Submission = { ...SUBMISSION, reportedCash: undefined };
-      const { logId } = await submit(withoutCash, receiptHash(withoutCash));
+    it.failing(
+      'verifies a genuine receipt-format log submitted without reportedCash',
+      async () => {
+        const withoutCash: Submission = {
+          ...SUBMISSION,
+          reportedCash: undefined,
+        };
+        const { logId } = await submit(withoutCash, receiptHash(withoutCash));
 
-      expect((await inspect(logId)).status).toBe(VERIFIED);
-    });
+        expect((await inspect(logId)).status).toBe(VERIFIED);
+      },
+    );
 
     // KNOWN GAP: the receipt format hashes recordedAt as the string the kiosk
     // sent, but inspection rebuilds it from the stored Date (".000Z" form), so
     // a genuine log sent without milliseconds is flagged as CHECKSUM_MISMATCH.
-    it.failing('verifies a genuine receipt-format log whose recordedAt was sent without milliseconds', async () => {
-      const noMillis: Submission = { ...SUBMISSION, recordedAt: '2026-11-04T10:00:00Z' };
-      const { logId } = await submit(noMillis, receiptHash(noMillis));
+    it.failing(
+      'verifies a genuine receipt-format log whose recordedAt was sent without milliseconds',
+      async () => {
+        const noMillis: Submission = {
+          ...SUBMISSION,
+          recordedAt: '2026-11-04T10:00:00Z',
+        };
+        const { logId } = await submit(noMillis, receiptHash(noMillis));
 
-      expect((await inspect(logId)).status).toBe(VERIFIED);
-    });
+        expect((await inspect(logId)).status).toBe(VERIFIED);
+      },
+    );
   });
 
   // ─────────────────────────────────────────────────────────
@@ -379,7 +423,10 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
     it.each<[string, (row: FakeLog) => void]>([
       ['meterVolume changed by 0.01 L', (row) => (row.meterVolume += 0.01)],
       ['meterVolume set to 0', (row) => (row.meterVolume = 0)],
-      ['recordedAt moved by 1 ms', (row) => (row.recordedAt = new Date(row.recordedAt.getTime() + 1))],
+      [
+        'recordedAt moved by 1 ms',
+        (row) => (row.recordedAt = new Date(row.recordedAt.getTime() + 1)),
+      ],
       ['kioskId reassigned', (row) => (row.kioskId = 'KIOSK-HASH-002')],
       ['transactionId replaced', (row) => (row.transactionId = 'TXN-HASH-999')],
     ])(
@@ -399,7 +446,9 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
           // Recomputed from the edited DB values, not cached from submission
           recomputedChecksum: v1HashOfRow(row),
         });
-        expect(verification.recomputedChecksum).not.toBe(verification.storedChecksum);
+        expect(verification.recomputedChecksum).not.toBe(
+          verification.storedChecksum,
+        );
       },
     );
 
@@ -452,11 +501,16 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
       }));
       for (const reading of readings) await submit(reading, v1Hash(reading));
 
-      prisma.logs.find((l) => l.transactionId === 'TXN-HASH-SWEEP-1')!.meterVolume = 999;
+      prisma.logs.find(
+        (l) => l.transactionId === 'TXN-HASH-SWEEP-1',
+      )!.meterVolume = 999;
 
       const list = await http().get('/api/kiosk/logs').expect(200);
       const results: Record<string, string> = {};
-      for (const log of list.body.data as { id: string; transactionId: string }[]) {
+      for (const log of list.body.data as {
+        id: string;
+        transactionId: string;
+      }[]) {
         results[log.transactionId] = (await inspect(log.id)).status;
       }
 
@@ -475,30 +529,38 @@ describe('Hash round trip: submission → storage → inspection (Story 05, e2e)
       row.checksum = v1HashOfRow(row);
 
       expect(receiptHashOfRow(row)).not.toBe(receipt.checksum);
-      expect(verifyReceiptSignature(receiptHashOfRow(row), receipt.signature)).toBe(false);
+      expect(
+        verifyReceiptSignature(receiptHashOfRow(row), receipt.signature),
+      ).toBe(false);
     });
 
     // KNOWN GAP: the stored checksum is not signed, so someone with DB access
     // who rewrites a value and recomputes a matching checksum passes inspection.
     // Only the operator's signed receipt (test above) still exposes the change.
-    it.failing('flags a row whose values and checksum were both rewritten consistently', async () => {
-      const { logId } = await submit(SUBMISSION, v1Hash(SUBMISSION));
-      const row = rowOf(logId);
+    it.failing(
+      'flags a row whose values and checksum were both rewritten consistently',
+      async () => {
+        const { logId } = await submit(SUBMISSION, v1Hash(SUBMISSION));
+        const row = rowOf(logId);
 
-      row.meterVolume = 1500.75;
-      row.checksum = v1HashOfRow(row);
+        row.meterVolume = 1500.75;
+        row.checksum = v1HashOfRow(row);
 
-      expect((await inspect(logId)).status).toBe(CHECKSUM_MISMATCH);
-    });
+        expect((await inspect(logId)).status).toBe(CHECKSUM_MISMATCH);
+      },
+    );
 
     // KNOWN GAP: the v1 checksum does not cover reportedCash, so editing the
     // cash on a v1-checksummed row is not detected on inspection.
-    it.failing('flags a v1-checksummed row whose reportedCash was edited', async () => {
-      const { logId } = await submit(SUBMISSION, v1Hash(SUBMISSION));
+    it.failing(
+      'flags a v1-checksummed row whose reportedCash was edited',
+      async () => {
+        const { logId } = await submit(SUBMISSION, v1Hash(SUBMISSION));
 
-      rowOf(logId).reportedCash = 245;
+        rowOf(logId).reportedCash = 245;
 
-      expect((await inspect(logId)).status).toBe(CHECKSUM_MISMATCH);
-    });
+        expect((await inspect(logId)).status).toBe(CHECKSUM_MISMATCH);
+      },
+    );
   });
 });

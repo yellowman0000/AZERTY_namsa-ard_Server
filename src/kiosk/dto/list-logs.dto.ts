@@ -1,5 +1,6 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -33,4 +34,26 @@ export class ListLogsQueryDto {
     message: `limit must not exceed ${MAX_LOG_PAGE_SIZE}`,
   })
   limit?: number;
+
+  /** Filter unread dashboard logs when true (Story 08). */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true || value === 1 || value === '1')
+      return true;
+    if (value === 'false' || value === false || value === 0 || value === '0')
+      return false;
+    return value;
+  })
+  @IsBoolean({ message: 'unseenOnly must be a boolean' })
+  unseenOnly?: boolean;
+
+  /** Optional filter: start date ISO-8601 (Story 06). */
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  /** Optional filter: end date ISO-8601 (Story 06). */
+  @IsOptional()
+  @IsString()
+  endDate?: string;
 }
