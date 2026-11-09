@@ -196,7 +196,6 @@ export class NetworkSimulator {
     const idx = this.faultQueue.findIndex((f) => {
       if (f.pathIncludes && !path.includes(f.pathIncludes)) return false;
       return !(f.transactionId && f.transactionId !== transactionId);
-
     });
     if (idx >= 0) return this.faultQueue.splice(idx, 1)[0].kind;
 
@@ -269,7 +268,9 @@ export class NetworkSimulator {
     if (fault === 'fake-ok') {
       this.stats.fakeOkResponses++;
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<html lang="en"><body>Sign in to continue using Wi-Fi</body></html>');
+      res.end(
+        '<html lang="en"><body>Sign in to continue using Wi-Fi</body></html>',
+      );
       return;
     }
 

@@ -154,8 +154,6 @@ export function verifyPayloadChecksum(
     recordedAt: payload.recordedAt,
   }).toLowerCase();
   return cleanHash === receiptHash;
-
-
 }
 
 /**

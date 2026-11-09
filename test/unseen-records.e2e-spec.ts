@@ -93,9 +93,9 @@ function createFakePrisma() {
               ) {
                 return false;
               }
-              return !(where?.recordedAt?.lte &&
-                l.recordedAt > where.recordedAt.lte);
-
+              return !(
+                where?.recordedAt?.lte && l.recordedAt > where.recordedAt.lte
+              );
             })
             .sort(byNewest);
 
@@ -116,9 +116,10 @@ function createFakePrisma() {
         }) => {
           return logs.filter((l) => {
             if (where?.kioskId && l.kioskId !== where.kioskId) return false;
-            return !(where?.isReadByManager !== undefined &&
-              l.isReadByManager !== where.isReadByManager);
-
+            return !(
+              where?.isReadByManager !== undefined &&
+              l.isReadByManager !== where.isReadByManager
+            );
           }).length;
         },
       ),
@@ -202,8 +203,8 @@ describe('Unseen-records tracking state per Operation Manager (Story 08, e2e)', 
         transactionId: `TXN-${i}`,
         kioskId: KIOSK_ID,
         meterVolume: 50 + i * 10,
-        reportedCash: (50 + i * 10),
-        expectedRevenue: (50 + i * 10),
+        reportedCash: 50 + i * 10,
+        expectedRevenue: 50 + i * 10,
         variance: 0,
         isAnomaly: false,
         checksum: null,

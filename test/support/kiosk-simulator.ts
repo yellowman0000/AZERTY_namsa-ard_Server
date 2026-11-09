@@ -386,9 +386,7 @@ export class KioskSimulator {
    * Operator presses "Submit". Online ⇒ send directly; offline or network
    * failure ⇒ cache in `offline_tx_queue` so nothing is lost.
    */
-  async submitReading(
-    meterVolume: number,
-  ): Promise<{
+  async submitReading(meterVolume: number): Promise<{
     via: 'server' | 'queue' | 'rejected';
     record: CachedTransaction;
   }> {
