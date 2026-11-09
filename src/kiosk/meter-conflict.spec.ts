@@ -119,6 +119,90 @@ describe('meter-conflict (Story 14-2)', () => {
     });
   });
 
+  describe('same-day scope & new-day in-memory baseline reset', () => {
+    it('uses in-memory baseline 0 on a new day without modifying DB records', async () => {
+      // Yesterday ended at 250 L; the stored row must keep that exact value.
+      const older: StoredReading = {
+        transactionId: 'TX-PREV-DAY',
+        meterVolume: 250.0,
+        recordedAt: new Date('2026-10-17T18:00:00.000Z'),
+      };
+      // Today's first reading is much lower – a new-day reset, not a conflict.
+      const nextDayIncoming: IncomingReading = {
+        kioskId: 'KIOSK-001',
+        meterVolume: 40.0,
+        recordedAt: new Date('2026-10-18T08:00:00.000Z'),
+      };
+
+      mockPrisma.dailyLog.findFirst.mockImplementation(
+        ({ where }: { where: { recordedAt: { gte?: Date; lte?: Date } } }) => {
+          if (where.recordedAt?.gte) return Promise.resolve(null);
+          if (where.recordedAt?.lte) return Promise.resolve(older);
+          return Promise.resolve(null);
+        },
+      );
+
+      const result = await findMeterConflict(mockPrisma, nextDayIncoming);
+
+      expect(result).toBeNull();
+      // The cross-day baseline is in-memory only – the stored row is untouched.
+      expect(older.meterVolume).toBe(250.0);
+    });
+
+    it('ignores a newer record when it belongs to a future UTC day', async () => {
+      // A next-day reading of 30 L must not be compared with this day's 180 L.
+      const newer: StoredReading = {
+        transactionId: 'TX-NEXT-DAY',
+        meterVolume: 30.0,
+        recordedAt: new Date('2026-10-19T08:00:00.000Z'),
+      };
+      const previousDayIncoming: IncomingReading = {
+        kioskId: 'KIOSK-001',
+        meterVolume: 180.0,
+        recordedAt: new Date('2026-10-18T20:00:00.000Z'),
+      };
+
+      mockPrisma.dailyLog.findFirst.mockImplementation(
+        ({ where }: { where: { recordedAt: { gte?: Date; lte?: Date } } }) => {
+          if (where.recordedAt?.gte) return Promise.resolve(newer);
+          return Promise.resolve(null);
+        },
+      );
+
+      const result = await findMeterConflict(mockPrisma, previousDayIncoming);
+
+      expect(result).toBeNull();
+    });
+
+    it('still flags LOWER_THAN_OLDER_READING when older is on the SAME UTC day', async () => {
+      const older: StoredReading = {
+        transactionId: 'TX-SAME-DAY',
+        meterVolume: 120.0,
+        recordedAt: new Date('2026-10-18T08:00:00.000Z'),
+      };
+      const sameDayIncoming: IncomingReading = {
+        kioskId: 'KIOSK-001',
+        meterVolume: 90.0,
+        recordedAt: new Date('2026-10-18T15:00:00.000Z'),
+      };
+
+      mockPrisma.dailyLog.findFirst.mockImplementation(
+        ({ where }: { where: { recordedAt: { gte?: Date; lte?: Date } } }) => {
+          if (where.recordedAt?.gte) return Promise.resolve(null);
+          if (where.recordedAt?.lte) return Promise.resolve(older);
+          return Promise.resolve(null);
+        },
+      );
+
+      const result = await findMeterConflict(mockPrisma, sameDayIncoming);
+
+      expect(result).toEqual({
+        reason: 'LOWER_THAN_OLDER_READING',
+        conflictingRecord: older,
+      });
+    });
+  });
+
   describe('toStateConflictException', () => {
     it('should construct a 409 ConflictException with correct payload and message', () => {
       const conflictingRecord: StoredReading = {

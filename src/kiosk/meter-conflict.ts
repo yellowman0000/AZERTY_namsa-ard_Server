@@ -45,18 +45,36 @@ export interface MeterConflictPrisma {
 }
 
 /**
+ * Returns true when two timestamps fall on the same UTC calendar day (YYYY-MM-DD).
+ */
+export function isSameUtcDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+/**
  * Detects whether an incoming meter reading conflicts with server state.
  *
- * `meterVolume` is a cumulative meter value, so for one kiosk it must never
- * decrease as `recordedAt` increases. The incoming reading must therefore fit
- * between its neighbours on the server:
+ * `meterVolume` is a cumulative meter value, so readings for one kiosk must
+ * never decrease as `recordedAt` increases **within the same UTC calendar
+ * day**. The incoming reading must therefore fit between its same-day
+ * neighbours on the server:
  *
- *   older reading  ≤  incoming  ≤  newer reading
+ *   older reading (same day)  ≤  incoming  ≤  newer reading (same day)
  *
  * A stored reading with the exact same `recordedAt` counts as both neighbours,
  * so it must have the same volume. Because every accepted reading passes this
- * check, the server history stays monotonic and only the nearest neighbour on
+ * check, each day's history stays monotonic and only the nearest neighbour on
  * each side needs to be compared.
+ *
+ * At a day boundary the meter is treated as reset for comparison purposes
+ * only: when the closest `older` record is from a previous UTC day, the
+ * in-memory baseline is `0` instead of that record's volume, and a `newer`
+ * record from a future UTC day is ignored. The stored records themselves are
+ * never modified, so yesterday's reading stays exactly as recorded.
  *
  * @returns the first conflict found (newer state is checked first), or `null`.
  */
@@ -65,6 +83,7 @@ export async function findMeterConflict(
   incoming: IncomingReading,
 ): Promise<MeterConflict | null> {
   const { kioskId, meterVolume, recordedAt } = incoming;
+  const newDayBaselineVolume = 0;
 
   // 1. Newer server state – the closest reading at or after the incoming time
   const newer = await prisma.dailyLog.findFirst({
@@ -73,7 +92,13 @@ export async function findMeterConflict(
     select: readingSelect,
   });
 
-  if (newer && newer.meterVolume < meterVolume) {
+  // Only compare against `newer` if it was recorded on the same UTC day.
+  // A future-day reading is a fresh-day baseline, not a continuation.
+  if (
+    newer &&
+    isSameUtcDay(newer.recordedAt, recordedAt) &&
+    newer.meterVolume < meterVolume
+  ) {
     return { reason: 'HIGHER_THAN_NEWER_READING', conflictingRecord: newer };
   }
 
@@ -84,7 +109,15 @@ export async function findMeterConflict(
     select: readingSelect,
   });
 
-  if (older && older.meterVolume > meterVolume) {
+  // If `older` is on the same UTC day, compare against `older.meterVolume`.
+  // If `older` is from a previous day, use in-memory baseline `0`
+  // (the stored database record is NOT modified).
+  const comparisonBaseline =
+    older && isSameUtcDay(older.recordedAt, recordedAt)
+      ? older.meterVolume
+      : newDayBaselineVolume;
+
+  if (older && meterVolume < comparisonBaseline) {
     return { reason: 'LOWER_THAN_OLDER_READING', conflictingRecord: older };
   }
 
