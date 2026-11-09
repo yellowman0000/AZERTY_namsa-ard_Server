@@ -2,8 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma.service';
 import { ExportReportQueryDto } from './dto/export-report.dto';
-
-const PRICE_PER_UNIT = 1;
+import { resolveUnitPrice } from './reconciliation';
 
 export interface ReportSummary {
   totalRecords: number;
@@ -55,6 +54,8 @@ function formatCsvRow(cells: unknown[]): string {
 }
 
 export function calculateReportSummary(logs: any[]): ReportSummary {
+  // One shared unit price for the whole application (see `reconciliation.ts`).
+  const unitPrice = resolveUnitPrice();
   let totalVolume = 0;
   let totalRevenue = 0;
   let totalExpectedRevenue = 0;
@@ -66,7 +67,7 @@ export function calculateReportSummary(logs: any[]): ReportSummary {
     const expected =
       log.expectedRevenue !== null && log.expectedRevenue !== undefined
         ? Number(log.expectedRevenue)
-        : volume * PRICE_PER_UNIT;
+        : volume * unitPrice;
     const variance =
       log.variance !== null && log.variance !== undefined
         ? Number(log.variance)
@@ -132,6 +133,7 @@ export function generateCsvReport(
   periodStr: string,
 ): Buffer {
   const lines: string[] = [];
+  const unitPrice = resolveUnitPrice();
 
   // Header / Title
   lines.push('AZERTY Water Kiosk - Operational Metrics Report');
@@ -177,7 +179,7 @@ export function generateCsvReport(
     const expected =
       log.expectedRevenue !== null && log.expectedRevenue !== undefined
         ? Number(log.expectedRevenue)
-        : volume * PRICE_PER_UNIT;
+        : volume * unitPrice;
     const variance =
       log.variance !== null && log.variance !== undefined
         ? Number(log.variance)

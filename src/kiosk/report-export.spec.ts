@@ -79,7 +79,7 @@ describe('Report Export Service (Story 07, Unit)', () => {
       expect(summary.discrepancyRatioPercent).toBe('0.00%');
     });
 
-    it('falls back to meterVolume when expectedRevenue is omitted', () => {
+    it('falls back to the shared unit price (150 L × 2 = 300) when expectedRevenue is omitted', () => {
       const summary = calculateReportSummary([
         {
           meterVolume: 150,
@@ -89,9 +89,10 @@ describe('Report Export Service (Story 07, Unit)', () => {
         },
       ]);
 
-      expect(summary.totalExpectedRevenue).toBe(150);
-      expect(summary.totalVariance).toBe(0);
-      expect(summary.discrepancyRatio).toBe(0);
+      expect(summary.totalExpectedRevenue).toBe(300);
+      expect(summary.totalVariance).toBe(-150);
+      expect(summary.discrepancyRatio).toBe(-50);
+      expect(summary.discrepancyRatioPercent).toBe('-50.00%');
     });
   });
 

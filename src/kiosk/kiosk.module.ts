@@ -6,6 +6,7 @@ import { LogInspectionController } from './log-inspection.controller';
 import { LogInspectionService } from './log-inspection.service';
 import { ReportExportController } from './report-export.controller';
 import { ReportExportService } from './report-export.service';
+import { ReconciliationService } from './reconciliation.service';
 import { PrismaService } from '../prisma.service';
 
 @Module({
@@ -19,8 +20,9 @@ import { PrismaService } from '../prisma.service';
     ImgbbService,
     LogInspectionService,
     ReportExportService,
+    ReconciliationService,
     PrismaService,
   ],
-  exports: [ReportExportService],
+  exports: [ReportExportService, ReconciliationService],
 })
 export class KioskModule {}

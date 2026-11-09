@@ -40,6 +40,9 @@ Server runs on `http://localhost:3001` by default.
 | `DATABASE_URL`        | —                                     | PostgreSQL connection string (see `.env.example`) |
 | `CLIENT_ORIGIN`       | `http://localhost:3000`               | Allowed CORS origin(s), comma-separated       |
 | `RECEIPT_SIGNING_KEY` | `namsa-ard-kiosk-receipt-secret-key`  | HMAC-SHA256 secret for signed receipts        |
+| `WATER_UNIT_PRICE_PER_LITER` | `2`                             | KES per litre — `expectedRevenue = meterVolume × unitPrice` (Story ID 04) |
+| `ANOMALY_BASELINE_WINDOW` | `7`                               | Previous daily records in the moving-average baseline (7 or 30) |
+| `RECONCILIATION_BATCH_ENABLED` | `false`                      | Run the reconciliation batch in-process daily at 00:15 UTC |
 
 ## API
 
@@ -53,6 +56,8 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB) to imgBB; returns `proofImageUrl` |
 | GET    | `/api/kiosk/logs?kioskId=&cursor=&limit=`             | Read-only log history, newest first — `{ "data": [...], "nextCursor": "<logId>" \| null }` (`limit` 1–100, default 20) |
 | GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
+| GET    | `/api/kiosk/reconciliation?kioskId=&isAnomaly=&startDate=&endDate=` | Interpreted daily logs: revenue metrics, variance ratios, and ±30 % volume-anomaly flags (see below) |
+| POST   | `/api/kiosk/reconciliation/run`                       | Run the daily batch reconciliation engine — recomputes and persists expected revenue, variance and anomaly flags; returns a summary |
 
 `GET /api/kiosk/logs/:id/inspect` recomputes the SHA-256 checksum from the
 row's **current** database values and compares it with the checksum stored at
@@ -109,6 +114,52 @@ Responses (Story 14-3 – server ACK confirmation). The kiosk marks a local reco
 | `409`  | Reading conflicts with newer/older server state | `{ "ack": false, "error": "STATE_CONFLICT" }` |
 | `422`  | Checksum mismatch | `{ "ack": false, "error": "CORRUPTED_PAYLOAD" }` |
 
+## Daily Reconciliation & Volume Anomaly Detection (Story ID 04)
+
+Every daily log is interpreted with these server-side business rules:
+
+```
+Expected Revenue      = Meter Volume × Unit Price     (default 2 KES/L)
+Variance              = Reported Cash − Expected Revenue
+Discrepancy Ratio (%) = (Variance ÷ Expected Revenue) × 100
+movingAvg             = mean(previous 7 daily volumes of the same kiosk)
+isAnomaly             = |currentVolume − movingAvg| > 0.30 × movingAvg
+```
+
+A deviation of **exactly ±30.0 %** is *not* flagged (strict `>`); **±30.1 %** is.
+Records without history are never flagged (`INSUFFICIENT_BASELINE`); a zero baseline
+uses the literal `|current| > 0` rule.
+
+Ingestion (`POST /api/kiosk/logs`) computes `expectedRevenue`/`variance` immediately
+from the shared unit price (client-supplied values are ignored) so the receipt matches
+the Sprint 2 contract: `500 L, 950 cash → expected 1000, variance −50`. The volume
+anomaly flag `isAnomaly` is classified by the **daily batch engine** and starts `false`
+on a fresh submission until the next batch run.
+
+### Run the batch
+
+```bash
+# Reconcile everything (daily cron equivalent)
+curl -X POST http://localhost:3001/api/kiosk/reconciliation/run \
+  -H 'Content-Type: application/json' -d '{}'
+
+# Reconcile one kiosk for October, preview only (no writes)
+curl -X POST http://localhost:3001/api/kiosk/reconciliation/run \
+  -H 'Content-Type: application/json' \
+  -d '{"kioskId":"KIOSK-001","startDate":"2026-10-01","endDate":"2026-10-31","dryRun":true}'
+
+# Inspect interpreted records, flagged anomalies only
+curl 'http://localhost:3001/api/kiosk/reconciliation?kioskId=KIOSK-001&isAnomaly=true'
+```
+
+The batch is deterministic and idempotent: only rows whose stored
+`expectedRevenue`/`variance`/`isAnomaly` changed are written, and a second identical
+run reports `updatedCount: 0`. Enable the built-in 00:15 UTC scheduler with
+`RECONCILIATION_BATCH_ENABLED=true`, or call the endpoint from an external cron.
+
+Full design, boundary table and verification evidence:
+[`docs/sprint_2_reconciliation_engine.md`](./docs/sprint_2_reconciliation_engine.md).
+
 ## Scripts
 
 | Command              | Description                  |
@@ -119,6 +170,7 @@ Responses (Story 14-3 – server ACK confirmation). The kiosk marks a local reco
 | `bun run start:prod` | Run compiled build           |
 | `bun run test`       | Unit tests                   |
 | `bun run test:sync`  | Story 14-3 E2E sync verification under unstable network |
+| `bun run test:reconciliation` | Story ID 04 reconciliation batch + anomaly API e2e suite |
 | `bun run test:e2e`   | All end-to-end tests         |
 | `bun run test:cov`   | Test coverage                |
 | `bun run lint`       | Lint with oxlint             |

@@ -107,14 +107,58 @@ describe('KioskService', () => {
           operatorId: null,
           meterVolume: 42.5,
           reportedCash: 0,
-          expectedRevenue: 42.5,
-          variance: -42.5,
-          isAnomaly: true,
+          // 42.5 L × 2 KES/L = 85; variance = 0 − 85.
+          expectedRevenue: 85,
+          variance: -85,
+          // Volume anomalies are classified by the daily batch engine.
+          isAnomaly: false,
           proofImageUrl: null,
           waterType: 'COMMERCIAL',
           recordedAt: new Date('2026-10-16T10:00:00.000Z'),
           checksum: validChecksum,
         },
+      });
+    });
+
+    it('computes the spec example server-side and ignores client-supplied revenue values', async () => {
+      const now = new Date();
+      const specDto: IngestLogDto = {
+        transactionId: 'TXN-20261031-001',
+        kioskId: 'KIOSK-001',
+        operatorId: 'OP-104',
+        meterVolume: 500,
+        reportedCash: 950,
+        recordedAt: '2026-10-31T10:00:00.000Z',
+        // Backward-compatible client values must NOT be trusted.
+        expectedRevenue: 1,
+        variance: 1,
+        isAnomaly: true,
+      };
+
+      prisma.kiosk.findUnique.mockResolvedValue({ id: 'KIOSK-001' });
+      prisma.dailyLog.findUnique.mockResolvedValue(null);
+      prisma.dailyLog.create.mockResolvedValue({
+        id: 'uuid-spec-04',
+        transactionId: specDto.transactionId,
+        kioskId: specDto.kioskId,
+        meterVolume: specDto.meterVolume,
+        recordedAt: new Date(specDto.recordedAt),
+        createdAt: now,
+        checksum: null,
+        isSynced: true,
+      });
+
+      const result = await service.ingestLog(specDto);
+
+      expect(result.success).toBe(true);
+      expect(prisma.dailyLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          meterVolume: 500,
+          reportedCash: 950,
+          expectedRevenue: 1000,
+          variance: -50,
+          isAnomaly: false,
+        }),
       });
     });
 

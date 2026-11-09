@@ -9,14 +9,23 @@ import {
   Res,
   HttpStatus,
   BadRequestException,
+  Optional,
+  ServiceUnavailableException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { KioskService } from './kiosk.service';
+import { ReconciliationService } from './reconciliation.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import { MarkSeenDto } from './dto/mark-seen.dto';
+import { RunReconciliationDto } from './dto/reconciliation-run.dto';
+import {
+  calculateReconciliation,
+  resolveUnitPrice,
+} from './reconciliation';
+import { ANOMALY_THRESHOLD } from './volume-anomaly';
 
 const MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_EVIDENCE_TYPES = new Set([
@@ -27,7 +36,13 @@ const ALLOWED_EVIDENCE_TYPES = new Set([
 
 @Controller(['api/kiosk', 'kiosk', 'api', ''])
 export class KioskController {
-  constructor(private readonly kioskService: KioskService) {}
+  constructor(
+    private readonly kioskService: KioskService,
+    // Optional so light-weight controller unit tests can instantiate the
+    // controller without the batch engine; KioskModule always provides it.
+    @Optional()
+    private readonly reconciliationService?: ReconciliationService,
+  ) {}
 
   // ───────────────────────────────────────────────────────────
   //  Story 02 – Ingest daily-log / meter-volume
@@ -92,7 +107,7 @@ export class KioskController {
   }
 
   // ───────────────────────────────────────────────────────────
-  //  Reconciliation – query interpreted daily-log records
+  //  Story 04 – Get interpreted daily-log records
   //  GET /api/kiosk/reconciliation
   //
   //  Optional query params:
@@ -100,6 +115,10 @@ export class KioskController {
   //    isAnomaly   true | false
   //    startDate   ISO-8601 (2026-11-01 or 2026-11-01T00:00:00Z)
   //    endDate     ISO-8601 (a date-only value includes the whole day)
+  //
+  //  Every record is enriched with server-computed discrepancy metrics
+  //  (never the stored/client-supplied revenue values) and the response
+  //  advertises the effective unit price and anomaly threshold.
   // ───────────────────────────────────────────────────────────
 
   @Get('reconciliation')
@@ -125,7 +144,64 @@ export class KioskController {
     }
 
     const records = await this.kioskService.getReconciliationRecords(filters);
-    return { count: records.length, records };
+    const unitPrice = resolveUnitPrice();
+
+    return {
+      count: records.length,
+      unitPrice,
+      anomalyThreshold: ANOMALY_THRESHOLD,
+      records: records.map((record) => {
+        const metrics = calculateReconciliation({
+          meterVolume: record.meterVolume,
+          reportedCash: record.reportedCash,
+          unitPrice,
+        });
+        return {
+          ...record,
+          discrepancyRatio: metrics.discrepancyRatio,
+          discrepancyPercentage: metrics.discrepancyPercentage,
+          hasVariance: metrics.hasVariance,
+          isCashShortfall: metrics.isCashShortfall,
+        };
+      }),
+    };
+  }
+
+  // ───────────────────────────────────────────────────────────
+  //  Story 04 – Run the daily batch reconciliation engine
+  //  POST /api/kiosk/reconciliation/run
+  //
+  //  Body (all optional): kioskId, startDate, endDate, date (single UTC
+  //  day), window (baseline size, 1…365), unitPrice, dryRun.
+  //  Returns the BatchSummary (counts, totals, per-record metrics and the
+  //  flagged anomaly list). 201 Created is the Nest default.
+  // ───────────────────────────────────────────────────────────
+
+  @Post('reconciliation/run')
+  async runReconciliation(@Body() dto: RunReconciliationDto) {
+    if (!this.reconciliationService) {
+      throw new ServiceUnavailableException(
+        'Reconciliation batch engine is not available.',
+      );
+    }
+
+    const startDate = this.parseDate('startDate', dto.startDate);
+    const endDate = this.parseDate('endDate', dto.endDate, true);
+    const date = this.parseDate('date', dto.date);
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new BadRequestException('startDate must not be after endDate');
+    }
+
+    return this.reconciliationService.runBatch({
+      kioskId: dto.kioskId?.trim() || undefined,
+      startDate,
+      endDate,
+      date,
+      window: dto.window,
+      unitPrice: dto.unitPrice,
+      dryRun: dto.dryRun,
+    });
   }
 
   private parseBoolean(name: string, value?: string): boolean | undefined {
