@@ -325,6 +325,7 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
           waterType: dto.waterType ?? 'COMMERCIAL',
           recordedAt: new Date(dto.recordedAt),
           checksum: dto.checksum ?? null,
+          isSynced: false,
         },
       });
 

@@ -24,7 +24,10 @@ docker compose up -d
 # 4. Create / sync database tables
 bunx prisma db push
 
-# 5. Run the server (watch mode)
+# 5. Regenerate Prisma Client after schema changes
+bunx prisma generate
+
+# 6. Run the server (watch mode)
 bun run start:dev
 ```
 
@@ -43,6 +46,21 @@ Server runs on `http://localhost:3001` by default.
 | `WATER_UNIT_PRICE_PER_LITER` | `2`                             | KES per litre — `expectedRevenue = meterVolume × unitPrice` (Story ID 04) |
 | `ANOMALY_BASELINE_WINDOW` | `7`                               | Previous daily records in the moving-average baseline (7 or 30) |
 | `RECONCILIATION_BATCH_ENABLED` | `false`                      | Run the reconciliation batch in-process daily at 00:15 UTC |
+
+## Scheduled Google Sheets synchronization
+
+When Google Sheets credentials are configured, a NestJS cron job checks every
+minute for daily logs that are not synced and have been marked as read by a
+manager (`isReadByManager=true`). Successful appends mark those rows as synced.
+HTTP 429 and transient server/network failures are saved in
+`sync_retry_queue` and retried with exponential backoff (one minute initially,
+capped at 24 hours). Each failed attempt is recorded in `system_audit_logs`;
+permanent failures remain in the queue with status `FAILED` and are not retried
+automatically. Logs are not sent when the Sheets integration is disabled.
+
+Set the `GOOGLE_SHEETS_*` and service-account variables shown in `.env.example`
+to enable the integration. Keep credentials in a secret manager or local
+environment file; never commit service-account private keys.
 
 ## API
 

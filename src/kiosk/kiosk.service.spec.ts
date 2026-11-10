@@ -116,6 +116,7 @@ describe('KioskService', () => {
           waterType: 'COMMERCIAL',
           recordedAt: new Date('2026-10-16T10:00:00.000Z'),
           checksum: validChecksum,
+          isSynced: false,
         },
       });
     });

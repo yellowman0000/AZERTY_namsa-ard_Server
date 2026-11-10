@@ -39,7 +39,7 @@ model DailyLog {
   checksum      String?
   waterType     WaterType @default(COMMERCIAL) @map("water_type") // User Story 09
 
-  isSynced        Boolean @default(true) @map("is_synced")
+  isSynced        Boolean @default(false) @map("is_synced")
   isReadByManager Boolean @default(false) @map("is_read_by_manager") // User Story 08 to check the manager open to check it or not.
 
   recordedAt DateTime @map("recorded_at")
@@ -49,5 +49,32 @@ model DailyLog {
 
   // Story 08: Composite Index For Pagination pull to old data and prevent to block Real-time.
   @@index([kioskId, recordedAt(sort: Desc)])
+  @@index([isSynced, isReadByManager, recordedAt])
   @@map("daily_logs")
+}
+
+model SyncRetryQueue {
+  id            String   @id @default(uuid())
+  logIds        String[] @map("log_ids")
+  retryCount    Int      @default(0) @map("retry_count")
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  errorMessage  String?  @map("error_message")
+  status        String   @default("PENDING")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([status, nextAttemptAt])
+  @@map("sync_retry_queue")
+}
+
+model SystemAuditLog {
+  id            String   @id @default(uuid())
+  jobType       String   @map("job_type")
+  failedRowIds  String[] @map("failed_row_ids")
+  errorMessage  String   @map("error_message")
+  retryCount    Int      @map("retry_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([jobType, createdAt(sort: Desc)])
+  @@map("system_audit_logs")
 }
