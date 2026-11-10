@@ -3,7 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import {
+  ARCHIVE_ORDER_BY,
+  buildArchivePage,
+  buildArchiveWhere,
+  matchesArchiveFilter,
+  normalizeArchiveLimit,
+  type ArchiveFilterRow,
+  type ArchivePage,
+} from './archive-pagination';
+import { ArchiveLogsQueryDto } from './dto/archive-logs.dto';
 import { DEFAULT_LOG_PAGE_SIZE, ListLogsQueryDto } from './dto/list-logs.dto';
 import {
   toLogInspection,
@@ -38,6 +49,31 @@ const summarySelect = {
   recordedAt: true,
   createdAt: true,
 } as const;
+
+/**
+ * Columns projected for the historical archive: the interpreted figures
+ * (Story 04) travel with each row so the manager table does not need a second
+ * request per page.
+ */
+const archiveSelect = {
+  id: true,
+  transactionId: true,
+  kioskId: true,
+  operatorId: true,
+  meterVolume: true,
+  reportedCash: true,
+  expectedRevenue: true,
+  variance: true,
+  isAnomaly: true,
+  waterType: true,
+  isReadByManager: true,
+  recordedAt: true,
+  createdAt: true,
+} as const;
+
+export type ArchiveLogRow = Prisma.DailyLogGetPayload<{
+  select: typeof archiveSelect;
+}>;
 
 /**
  * Read-only access to stored daily logs for Operation Managers.
@@ -125,6 +161,98 @@ export class LogInspectionService {
       nextCursor: hasMore ? data[data.length - 1].id : null,
       ...(unseenCount !== undefined ? { unseenCount } : {}),
     };
+  }
+
+  /**
+   * Story ID 08 – cursor-paginated historical archive.
+   *
+   * Pages newest-first through `daily_logs` with `recorded_at DESC, id DESC`,
+   * which the composite index `daily_logs_kiosk_id_recorded_at_idx`
+   * (`kiosk_id, recorded_at DESC`) serves. One extra row is fetched to learn
+   * whether the caller may continue, so the response can hand out a
+   * `nextCursor` without a second count query.
+   *
+   * `GET /api/kiosk/logs/archive?cursor=<id>&limit=20`
+   */
+  async listArchive(
+    query: ArchiveLogsQueryDto,
+  ): Promise<ArchivePage<ArchiveLogRow>> {
+    const limit = normalizeArchiveLimit(query.limit);
+    const where = buildArchiveWhere(query);
+
+    // Prisma positions a cursor relative to a stored row; fail fast (400)
+    // instead of surfacing an opaque engine error for a stale/deleted cursor.
+    let skip = 0;
+    if (query.cursor) {
+      const position = await this.resolveArchiveCursor(query.cursor, query.kioskId);
+      // Prisma's `cursor` + `skip: 1` drops the cursor row via SQL `OFFSET 1`.
+      // That is only the row we mean to drop while the cursor still matches the
+      // active filter; otherwise the OFFSET would eat the first matching row.
+      skip = matchesArchiveFilter(position, query) ? 1 : 0;
+    }
+
+    let rows: ArchiveLogRow[];
+    try {
+      rows = await this.prisma.dailyLog.findMany({
+        where,
+        orderBy: ARCHIVE_ORDER_BY,
+        take: limit + 1,
+        ...(query.cursor
+          ? { cursor: { id: query.cursor }, skip }
+          : {}),
+        select: archiveSelect,
+      });
+    } catch (error) {
+      // Defensive: map Prisma's "cursor row not found" error to the same 400.
+      // Prisma 6 returns an empty page for a cursor deleted after the guard
+      // above rather than raising, so this is insurance, not the main path.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new BadRequestException(
+          `cursor "${query.cursor}" is no longer available`,
+        );
+      }
+      throw error;
+    }
+
+    return buildArchivePage(rows, limit);
+  }
+
+  /**
+   * Resolves a cursor id to its row. A cursor must exist, and a cursor
+   * pointing at another kiosk's log is rejected: paginating that archive from
+   * a foreign position would silently return a wrong page instead of an error.
+   */
+  private async resolveArchiveCursor(
+    cursor: string,
+    kioskId?: string,
+  ): Promise<ArchiveFilterRow> {
+    const position = await this.prisma.dailyLog.findUnique({
+      where: { id: cursor },
+      select: {
+        id: true,
+        kioskId: true,
+        isReadByManager: true,
+        recordedAt: true,
+      },
+    });
+
+    if (!position) {
+      throw new BadRequestException(
+        `cursor "${cursor}" was not found in the archive`,
+      );
+    }
+
+    const requestedKioskId = kioskId?.trim();
+    if (requestedKioskId && position.kioskId !== requestedKioskId) {
+      throw new BadRequestException(
+        `cursor does not belong to kioskId "${requestedKioskId}"`,
+      );
+    }
+
+    return position;
   }
 
   /** Loads a log and re-verifies its checksum against the current DB values. */

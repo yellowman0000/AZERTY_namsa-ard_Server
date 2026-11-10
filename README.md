@@ -73,6 +73,7 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
 | POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB) to imgBB; returns `proofImageUrl` |
 | GET    | `/api/kiosk/logs?kioskId=&cursor=&limit=`             | Read-only log history, newest first — `{ "data": [...], "nextCursor": "<logId>" \| null }` (`limit` 1–100, default 20) |
+| GET    | `/api/kiosk/logs/archive?kioskId=&cursor=&limit=`     | Historical archive, newest first, cursor-paginated — `{ "data": [...], "nextCursor": "<logId>" \| null, "hasMore": bool, "limit": n }` (`limit` 1–100, default 20; `400` on `startDate > endDate` or a stale/foreign cursor) |
 | GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
 | GET    | `/api/kiosk/reconciliation?kioskId=&isAnomaly=&startDate=&endDate=` | Interpreted daily logs: revenue metrics, variance ratios, and ±30 % volume-anomaly flags (see below) |
 | POST   | `/api/kiosk/reconciliation/run`                       | Run the daily batch reconciliation engine — recomputes and persists expected revenue, variance and anomaly flags; returns a summary |
@@ -177,6 +178,34 @@ run reports `updatedCount: 0`. Enable the built-in 00:15 UTC scheduler with
 
 Full design, boundary table and verification evidence:
 [`docs/sprint_2_reconciliation_engine.md`](./docs/sprint_2_reconciliation_engine.md).
+
+## Historical archive (Story ID 08)
+
+`GET /api/kiosk/logs/archive` pages through older daily logs newest-first with an opaque
+`cursor` (the `nextCursor` of the previous page) instead of an offset, so scrolling deep
+history never skips or duplicates a row and the indexed read does not compete with the
+real-time listeners:
+
+```bash
+curl 'http://localhost:3001/api/kiosk/logs/archive?kioskId=KIOSK-001&limit=20'
+curl 'http://localhost:3001/api/kiosk/logs/archive?kioskId=KIOSK-001&limit=20&cursor=<nextCursor>'
+```
+
+Optional filters: `unseenOnly=true`, `startDate`, `endDate` (a date-only `endDate`
+includes that whole UTC day). The response is
+`{ "data": [...], "nextCursor": "<logId>" | null, "hasMore": bool, "limit": n }`, where
+each row also carries the Story 04 reconciliation fields. Paging order is the total order
+`recorded_at DESC, id DESC`, served by the Prisma composite index
+`@@index([kioskId, recordedAt(sort: Desc)])`
+(`daily_logs_kiosk_id_recorded_at_idx`). `limit` is 1–100 (default 20); `startDate > endDate`
+or a stale/foreign-kiosk cursor returns `400`. The no-skip/no-duplicate guarantee covers both
+unfiltered and filtered walks: a cursor whose own row no longer satisfies the active filter
+(e.g. it was marked seen while paging with `unseenOnly=true`) is handled explicitly, so the
+first matching row is not dropped. Regression tests cover it in
+`test/archive-pagination.e2e-spec.ts`.
+
+Full design, endpoint contract and verification evidence:
+[`docs/sprint_2_archive_pagination.md`](./docs/sprint_2_archive_pagination.md).
 
 ## Scripts
 
