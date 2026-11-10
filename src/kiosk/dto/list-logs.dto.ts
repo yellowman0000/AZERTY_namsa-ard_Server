@@ -8,12 +8,13 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { DateRangeQueryDto } from './date-range.dto';
 
 export const DEFAULT_LOG_PAGE_SIZE = 20;
 export const MAX_LOG_PAGE_SIZE = 100;
 
 /** Query for `GET /api/kiosk/logs` – newest first, cursor-paginated. */
-export class ListLogsQueryDto {
+export class ListLogsQueryDto extends DateRangeQueryDto {
   /** Only return logs from this kiosk. */
   @IsOptional()
   @IsString()
@@ -46,14 +47,4 @@ export class ListLogsQueryDto {
   })
   @IsBoolean({ message: 'unseenOnly must be a boolean' })
   unseenOnly?: boolean;
-
-  /** Optional filter: start date ISO-8601 (Story 06). */
-  @IsOptional()
-  @IsString()
-  startDate?: string;
-
-  /** Optional filter: end date ISO-8601 (Story 06). */
-  @IsOptional()
-  @IsString()
-  endDate?: string;
 }

@@ -20,6 +20,7 @@ import { KioskService } from './kiosk.service';
 import { ReconciliationService } from './reconciliation.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import { MarkSeenDto } from './dto/mark-seen.dto';
+import { ReconciliationQueryDto } from './dto/reconciliation-query.dto';
 import { RunReconciliationDto } from './dto/reconciliation-run.dto';
 import {
   calculateReconciliation,
@@ -122,26 +123,15 @@ export class KioskController {
   // ───────────────────────────────────────────────────────────
 
   @Get('reconciliation')
-  async getReconciliation(
-    @Query('kioskId') kioskId?: string,
-    @Query('isAnomaly') isAnomaly?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-  ) {
+  async getReconciliation(@Query() query: ReconciliationQueryDto) {
+    // `startDate`/`endDate` format and ordering are enforced by the DTO;
+    // parseDate still converts them and widens a date-only endDate.
     const filters = {
-      kioskId: kioskId?.trim() || undefined,
-      isAnomaly: this.parseBoolean('isAnomaly', isAnomaly),
-      startDate: this.parseDate('startDate', startDate),
-      endDate: this.parseDate('endDate', endDate, true),
+      kioskId: query.kioskId?.trim() || undefined,
+      isAnomaly: this.parseBoolean('isAnomaly', query.isAnomaly),
+      startDate: this.parseDate('startDate', query.startDate),
+      endDate: this.parseDate('endDate', query.endDate, true),
     };
-
-    if (
-      filters.startDate &&
-      filters.endDate &&
-      filters.startDate > filters.endDate
-    ) {
-      throw new BadRequestException('startDate must not be after endDate');
-    }
 
     const records = await this.kioskService.getReconciliationRecords(filters);
     const unitPrice = resolveUnitPrice();
