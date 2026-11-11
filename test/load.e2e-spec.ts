@@ -184,7 +184,8 @@ describe('Database Write Operations Load & Concurrency Testing (Supabase)', () =
       expect(dbRow!.meterVolume).toBe(expected.meterVolume);
       expect(dbRow!.checksum).toBe(expected.checksum);
       expect(dbRow!.recordedAt.toISOString()).toBe(expected.recordedAt);
-      expect(dbRow!.isSynced).toBe(true);
+      // New logs start unsynced until the Google Sheets scheduler exports them.
+      expect(dbRow!.isSynced).toBe(false);
     }
   }, 180000);
 

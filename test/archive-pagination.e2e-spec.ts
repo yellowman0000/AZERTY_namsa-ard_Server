@@ -398,15 +398,24 @@ describe('Archive cursor pagination (Story ID 08, e2e, real Postgres)', () => {
       endDate: '2026-02-01',
     }).expect(400);
 
-    expect(res.body.message).toBe('startDate must not be after endDate');
+    // Spec: 400 { statusCode: 400, message: "startDate must not be after endDate" }.
+    // The Story 06 DTO now rejects the range in the global ValidationPipe,
+    // which wraps messages in an array – so accept the string or a
+    // one-entry array, but nothing else and no extra errors.
+    expect(res.body.statusCode).toBe(400);
+    expect(([] as string[]).concat(res.body.message)).toEqual([
+      'startDate must not be after endDate',
+    ]);
   });
 
   it('rejects a garbage startDate with the exact message', async () => {
     const res = await getArchive({ startDate: 'not-a-date' }).expect(400);
 
-    expect(res.body.message).toBe(
+    // Same ValidationPipe array wrapping as above; still exactly one message.
+    expect(res.body.statusCode).toBe(400);
+    expect(([] as string[]).concat(res.body.message)).toEqual([
       'startDate must be a valid ISO-8601 date string',
-    );
+    ]);
   });
 
   it.each(['0', '101', '2.5', 'abc'])(

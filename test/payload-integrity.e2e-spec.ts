@@ -104,7 +104,8 @@ describe('Payload Integrity & Database Write Operations (e2e with Supabase)', ()
       expect(dbRow!.kioskId).toBe(TEST_KIOSK_ID);
       expect(dbRow!.meterVolume).toBe(45.75);
       expect(dbRow!.checksum).toBe(checksumHash);
-      expect(dbRow!.isSynced).toBe(true);
+      // New logs start unsynced until the Google Sheets scheduler exports them.
+      expect(dbRow!.isSynced).toBe(false);
       expect(dbRow!.recordedAt.toISOString()).toBe(recordedAtStr);
       expect(dbRow!.createdAt).toBeInstanceOf(Date);
     });
