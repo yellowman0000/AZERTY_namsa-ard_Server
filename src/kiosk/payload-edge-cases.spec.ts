@@ -373,14 +373,14 @@ describe('Payload edge cases – corrupted JSON & schema conflicts (Story 14-2, 
       const res = await postJson(
         validPayload({
           transactionId: 'TXN-EXTRA',
-          isSynced: false,
+          isSynced: true,
           id: 'forged-id',
         }),
       );
 
       expect(res.status).toBe(201);
       expect(prisma.logs[0].id).not.toBe('forged-id');
-      expect(prisma.logs[0].isSynced).toBe(true);
+      expect(prisma.logs[0].isSynced).toBe(false);
     });
 
     // KNOWN GAP: @IsNotEmpty() allows whitespace, so "   " passes validation and
