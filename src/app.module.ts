@@ -6,6 +6,7 @@ import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { GoogleSheetsSyncModule } from './google-sheets/google-sheets-sync.module';
 import { PrismaModule } from './prisma.module';
+import { ReceiptAcceptanceModule } from './receipt-acceptance/receipt-acceptance.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma.module';
     KioskModule,
     GoogleSheetsModule,
     GoogleSheetsSyncModule,
+    ReceiptAcceptanceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

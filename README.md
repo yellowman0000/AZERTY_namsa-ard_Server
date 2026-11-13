@@ -47,11 +47,30 @@ Server runs on `http://localhost:3001` by default.
 | `ANOMALY_BASELINE_WINDOW` | `7`                               | Previous daily records in the moving-average baseline (7 or 30) |
 | `RECONCILIATION_BATCH_ENABLED` | `false`                      | Run the reconciliation batch in-process daily at 00:15 UTC |
 
+## Manager receipt acceptance → Google Sheets
+
+A daily log reaches Google Sheets only after a manager accepts the operator
+receipt on the dashboard:
+
+1. The manager opens **Operations review** in the operator console and clicks
+   **Review** on a record (evidence photo, figures, checksum check).
+2. **Accept** calls `POST /api/kiosk/logs/:id/accept` (optional body
+   `{ "managerId": "..." }`). The server stamps `acceptedAt` / `acceptedBy`
+   and appends the row to the sheet straight away.
+3. The response reports `sheet.status`: `SYNCED`, `ALREADY_SYNCED` (accepting
+   twice never adds a second row), `PENDING` (Sheets failed; the cron job below
+   retries it) or `DISABLED` (Sheets is not configured).
+
+Marking a log as seen (`PATCH /api/kiosk/logs/mark-seen`) no longer sends it to
+Google Sheets. After pulling this change, run `bunx prisma db push` to add the
+`accepted_at` / `accepted_by` columns.
+
 ## Scheduled Google Sheets synchronization
 
 When Google Sheets credentials are configured, a NestJS cron job checks every
-minute for daily logs that are not synced and have been marked as read by a
-manager (`isReadByManager=true`). Successful appends mark those rows as synced.
+minute for daily logs that are not synced and have been accepted by a manager
+(`acceptedAt` set). It is the safety net for accepted rows whose immediate
+append failed. Successful appends mark those rows as synced.
 HTTP 429 and transient server/network failures are saved in
 `sync_retry_queue` and retried with exponential backoff (one minute initially,
 capped at 24 hours). Each failed attempt is recorded in `system_audit_logs`;

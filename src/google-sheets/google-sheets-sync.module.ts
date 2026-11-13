@@ -5,5 +5,6 @@ import { GoogleSheetsSyncScheduler } from './google-sheets-sync.scheduler';
 @Module({
   imports: [GoogleSheetsModule],
   providers: [GoogleSheetsSyncScheduler],
+  exports: [GoogleSheetsSyncScheduler],
 })
 export class GoogleSheetsSyncModule {}

@@ -13,6 +13,7 @@ describe('GoogleSheetsSyncScheduler', () => {
       recordedAt: new Date(),
       createdAt: new Date(),
       isReadByManager: true,
+      acceptedAt: new Date(),
       isSynced: false,
     };
     const prisma = {
@@ -52,7 +53,7 @@ describe('GoogleSheetsSyncScheduler', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           isSynced: false,
-          isReadByManager: true,
+          acceptedAt: { not: null },
         }),
       }),
     );
@@ -83,6 +84,7 @@ describe('GoogleSheetsSyncScheduler', () => {
       recordedAt: new Date(),
       createdAt: new Date(),
       isReadByManager: true,
+      acceptedAt: new Date(),
       isSynced: false,
     };
     const prisma = {

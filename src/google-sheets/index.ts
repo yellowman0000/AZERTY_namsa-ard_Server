@@ -33,7 +33,11 @@ export {
 } from './google-sheets.errors';
 export { GoogleSheetsModule } from './google-sheets.module';
 export { GoogleSheetsSyncModule } from './google-sheets-sync.module';
-export { GoogleSheetsSyncScheduler } from './google-sheets-sync.scheduler';
+export {
+  type AcceptedLogSheetResult,
+  type AcceptedLogSheetStatus,
+  GoogleSheetsSyncScheduler,
+} from './google-sheets-sync.scheduler';
 export {
   type AppendDailyLogsResult,
   GOOGLE_SHEETS_CLIENT_FACTORY,

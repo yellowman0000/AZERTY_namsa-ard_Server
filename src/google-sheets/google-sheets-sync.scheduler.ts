@@ -11,31 +11,112 @@ const RETRY_BASE_MS = 60_000;
 const RETRY_MAX_MS = 24 * 60 * 60 * 1_000;
 const JOB_TYPE = 'GOOGLE_SHEETS_SYNC';
 
+/** Only logs a manager accepted on the dashboard are written to Google Sheets. */
+const ACCEPTED = { acceptedAt: { not: null } } as const;
+
+export type AcceptedLogSheetStatus =
+  /** The row was written to Google Sheets by this call. */
+  | 'SYNCED'
+  /** The row was already in Google Sheets. */
+  | 'ALREADY_SYNCED'
+  /** Google Sheets did not take the row yet; the scheduled job retries it. */
+  | 'PENDING'
+  /** Google Sheets is not configured on this server. */
+  | 'DISABLED';
+
+export interface AcceptedLogSheetResult {
+  status: AcceptedLogSheetStatus;
+  updatedRange?: string | null;
+  message?: string;
+}
+
 @Injectable()
 export class GoogleSheetsSyncScheduler {
   private readonly logger = new Logger(GoogleSheetsSyncScheduler.name);
-  private running = false;
+  private cycleRunning = false;
+  /**
+   * Serialises Sheets writes: the scheduled cycle and an on-accept push must
+   * never append the same log twice, so every write runs one after another and
+   * re-reads `isSynced` inside the lock.
+   */
+  private writeChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly sheets: GoogleSheetsService,
   ) {}
 
+  private exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(task, task);
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Safety net for accepted logs: retries rows whose on-accept push failed and
+   * picks up any accepted row that is still not in the sheet.
+   */
   @Cron(CronExpression.EVERY_MINUTE)
   async syncApprovedLogs(): Promise<void> {
-    if (!this.sheets.isEnabled || this.running) return;
+    if (!this.sheets.isEnabled || this.cycleRunning) return;
 
-    this.running = true;
+    this.cycleRunning = true;
     try {
-      await this.processDueRetries();
-      await this.enqueueApprovedLogs();
+      await this.exclusive(async () => {
+        await this.processDueRetries();
+        await this.enqueueApprovedLogs();
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown synchronization error';
       this.logger.error(`Google Sheets sync cycle failed: ${message}`);
     } finally {
-      this.running = false;
+      this.cycleRunning = false;
     }
+  }
+
+  /**
+   * Writes one accepted log to Google Sheets right away (manager clicked
+   * Accept). A failure is not thrown: the log stays accepted and unsynced, so
+   * the scheduled cycle retries it with the usual backoff and audit trail.
+   */
+  async syncAcceptedLog(logId: string): Promise<AcceptedLogSheetResult> {
+    if (!this.sheets.isEnabled) {
+      return {
+        status: 'DISABLED',
+        message:
+          'Google Sheets is not configured on the server. The receipt is accepted and will be added once Sheets sync is set up.',
+      };
+    }
+
+    return this.exclusive(async () => {
+      const log = await this.prisma.dailyLog.findFirst({
+        where: { id: logId, ...ACCEPTED },
+      });
+      if (!log) {
+        return { status: 'PENDING', message: 'The log is not accepted.' };
+      }
+      if (log.isSynced) return { status: 'ALREADY_SYNCED' };
+
+      try {
+        const result = await this.sheets.appendDailyLogs([log]);
+        await this.prisma.dailyLog.updateMany({
+          where: { id: { in: result.syncedLogIds }, isSynced: false },
+          data: { isSynced: true },
+        });
+        return { status: 'SYNCED', updatedRange: result.updatedRange };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown Google Sheets error';
+        this.logger.warn(
+          `Accepted log ${logId} was not written to Google Sheets yet: ${message}`,
+        );
+        return {
+          status: 'PENDING',
+          message: `Google Sheets did not take the row yet (${message}). The server retries automatically.`,
+        };
+      }
+    });
   }
 
   private async processDueRetries(): Promise<void> {
@@ -50,7 +131,7 @@ export class GoogleSheetsSyncScheduler {
         where: {
           id: { in: item.logIds },
           isSynced: false,
-          isReadByManager: true,
+          ...ACCEPTED,
         },
         orderBy: { recordedAt: 'asc' },
       });
@@ -137,7 +218,7 @@ export class GoogleSheetsSyncScheduler {
     const logs = await this.prisma.dailyLog.findMany({
       where: {
         isSynced: false,
-        isReadByManager: true,
+        ...ACCEPTED,
         ...(queuedIds.size > 0 ? { id: { notIn: [...queuedIds] } } : {}),
       },
       orderBy: { recordedAt: 'asc' },

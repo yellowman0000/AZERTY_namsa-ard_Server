@@ -42,6 +42,10 @@ model DailyLog {
   isSynced        Boolean @default(false) @map("is_synced")
   isReadByManager Boolean @default(false) @map("is_read_by_manager") // User Story 08 to check the manager open to check it or not.
 
+  // Manager accepted the operator receipt on the dashboard; only accepted logs go to Google Sheets.
+  acceptedAt DateTime? @map("accepted_at")
+  acceptedBy String?   @map("accepted_by")
+
   recordedAt DateTime @map("recorded_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
@@ -50,6 +54,7 @@ model DailyLog {
   // Story 08: Composite Index For Pagination pull to old data and prevent to block Real-time.
   @@index([kioskId, recordedAt(sort: Desc)])
   @@index([isSynced, isReadByManager, recordedAt])
+  @@index([isSynced, acceptedAt])
   @@map("daily_logs")
 }
 

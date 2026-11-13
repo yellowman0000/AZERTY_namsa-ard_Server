@@ -495,6 +495,8 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
         proofImageUrl: true,
         waterType: true,
         isReadByManager: true,
+        isSynced: true,
+        acceptedAt: true,
         recordedAt: true,
         createdAt: true,
       },

@@ -75,6 +75,7 @@ interface FakeLog {
   checksum: string;
   isSynced: boolean;
   isReadByManager: boolean;
+  acceptedAt: Date | null;
   recordedAt: Date;
   createdAt: Date;
 }
@@ -130,7 +131,7 @@ function createFakePrisma() {
           where = {},
           take,
         }: {
-          where?: { id?: IdFilter; isSynced?: boolean; isReadByManager?: boolean };
+          where?: { id?: IdFilter; isSynced?: boolean; acceptedAt?: { not: null } };
           take?: number;
         }) =>
           dailyLogs
@@ -138,7 +139,7 @@ function createFakePrisma() {
               (log) =>
                 matchesId(log.id, where.id) &&
                 (where.isSynced === undefined || log.isSynced === where.isSynced) &&
-                (where.isReadByManager === undefined || log.isReadByManager === where.isReadByManager),
+                (where.acceptedAt === undefined || log.acceptedAt !== null),
             )
             .sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime())
             .slice(0, take ?? Infinity)
@@ -234,6 +235,7 @@ function approvedLog(overrides: Partial<FakeLog> = {}): FakeLog {
     checksum: 'abc123',
     isSynced: false,
     isReadByManager: true,
+    acceptedAt: recordedAt,
     recordedAt,
     createdAt: recordedAt,
     ...overrides,
@@ -301,8 +303,8 @@ describe('Story 03 – Google Sheets sync: simulated 429 / 503 / network drop (E
       expect(db.auditLogs).toHaveLength(0);
     });
 
-    it('never sends a log that a manager has not approved yet', async () => {
-      db.dailyLogs.push(approvedLog({ isReadByManager: false }));
+    it('never sends a log that a manager has not accepted yet', async () => {
+      db.dailyLogs.push(approvedLog({ acceptedAt: null }));
 
       await queueThenSend();
 

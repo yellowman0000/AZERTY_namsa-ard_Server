@@ -40,6 +40,7 @@ export interface InspectableLog {
   waterType?: 'COMMERCIAL' | 'SUBSIDIZED' | null;
   isSynced?: boolean | null;
   isReadByManager?: boolean | null;
+  acceptedAt?: Date | null;
 }
 
 export interface ChecksumVerification {
@@ -68,6 +69,7 @@ export interface InspectedLog {
   waterType?: 'COMMERCIAL' | 'SUBSIDIZED' | null;
   isSynced?: boolean | null;
   isReadByManager?: boolean | null;
+  acceptedAt?: Date | null;
 }
 
 export interface LogInspection {
@@ -178,6 +180,7 @@ export function toLogInspection(
       ...(log.isReadByManager !== undefined
         ? { isReadByManager: log.isReadByManager }
         : {}),
+      ...(log.acceptedAt !== undefined ? { acceptedAt: log.acceptedAt } : {}),
     },
     verification: verifyStoredChecksum(log, now),
   };
