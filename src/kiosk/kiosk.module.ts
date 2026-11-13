@@ -7,12 +7,15 @@ import { LogInspectionService } from './log-inspection.service';
 import { ReportExportController } from './report-export.controller';
 import { ReportExportService } from './report-export.service';
 import { ReconciliationService } from './reconciliation.service';
+import { StakeholderAnalyticsController } from './stakeholder-analytics.controller';
+import { StakeholderAnalyticsService } from './stakeholder-analytics.service';
 
 @Module({
   controllers: [
     KioskController,
     LogInspectionController,
     ReportExportController,
+    StakeholderAnalyticsController,
   ],
   providers: [
     KioskService,
@@ -20,7 +23,12 @@ import { ReconciliationService } from './reconciliation.service';
     LogInspectionService,
     ReportExportService,
     ReconciliationService,
+    StakeholderAnalyticsService,
   ],
-  exports: [ReportExportService, ReconciliationService],
+  exports: [
+    ReportExportService,
+    ReconciliationService,
+    StakeholderAnalyticsService,
+  ],
 })
 export class KioskModule {}
