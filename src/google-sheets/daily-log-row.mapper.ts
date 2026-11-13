@@ -46,8 +46,10 @@ export interface SheetRowOptions {
   timeZone?: string;
 }
 
-interface SheetColumn {
+export interface SheetColumn {
+  key: string;
   header: string;
+  aliases?: readonly string[];
   cell: (log: SheetDailyLog, timeZone: string) => SheetCellValue;
 }
 
@@ -164,58 +166,185 @@ export function discrepancyPercent(log: SheetDailyLog): number | string {
 }
 
 /**
- * Column order of the synced sheet. Append new columns at the END only —
- * reordering would shift data under existing headers in the live sheet.
+ * Default column order written to an empty sheet. Append new columns at the END
+ * only — reordering would shift data under existing headers in a live sheet.
  */
 export const DAILY_LOG_SHEET_COLUMNS: readonly SheetColumn[] = [
-  { header: 'Log ID', cell: (l) => toSheetText(l.id) },
-  { header: 'Transaction ID', cell: (l) => toSheetText(l.transactionId) },
-  { header: 'Kiosk ID', cell: (l) => toSheetText(l.kioskId) },
-  { header: 'Operator ID', cell: (l) => toSheetText(l.operatorId) },
-  { header: 'Water Type', cell: (l) => toSheetText(l.waterType) },
-  { header: 'Meter Volume (L)', cell: (l) => toSheetNumber(l.meterVolume, 3) },
+  { key: 'id', header: 'Log ID', cell: (l) => toSheetText(l.id) },
   {
+    key: 'transactionId',
+    header: 'Transaction ID',
+    cell: (l) => toSheetText(l.transactionId),
+  },
+  { key: 'kioskId', header: 'Kiosk ID', cell: (l) => toSheetText(l.kioskId) },
+  {
+    key: 'operatorId',
+    header: 'Operator ID',
+    cell: (l) => toSheetText(l.operatorId),
+  },
+  {
+    key: 'waterType',
+    header: 'Water Type',
+    cell: (l) => toSheetText(l.waterType),
+  },
+  {
+    key: 'meterVolume',
+    header: 'Meter Volume (L)',
+    aliases: ['Meter Volume'],
+    cell: (l) => toSheetNumber(l.meterVolume, 3),
+  },
+  {
+    key: 'reportedCash',
     header: 'Reported Cash (KES)',
+    aliases: ['Reported Cash'],
     cell: (l) => toSheetNumber(l.reportedCash, 2),
   },
   {
+    key: 'expectedRevenue',
     header: 'Expected Revenue (KES)',
+    aliases: ['Expected Revenue'],
     cell: (l) => toSheetNumber(l.expectedRevenue, 2),
   },
-  { header: 'Variance (KES)', cell: (l) => toSheetNumber(l.variance, 2) },
-  { header: 'Discrepancy (%)', cell: (l) => discrepancyPercent(l) },
-  { header: 'Anomaly', cell: (l) => toSheetBoolean(l.isAnomaly) },
   {
+    key: 'variance',
+    header: 'Variance (KES)',
+    aliases: ['Variance'],
+    cell: (l) => toSheetNumber(l.variance, 2),
+  },
+  {
+    key: 'discrepancyPercent',
+    header: 'Discrepancy (%)',
+    aliases: ['Discrepancy'],
+    cell: (l) => discrepancyPercent(l),
+  },
+  {
+    key: 'isAnomaly',
+    header: 'Anomaly',
+    aliases: ['Anomaly Status', 'Is Anomaly'],
+    cell: (l) => toSheetBoolean(l.isAnomaly),
+  },
+  {
+    key: 'recordedAt',
     header: 'Recorded At',
     cell: (l, tz) => formatSheetDateTime(l.recordedAt, tz),
   },
   {
+    key: 'createdAt',
     header: 'Server Received At',
+    aliases: ['Created At'],
     cell: (l, tz) => formatSheetDateTime(l.createdAt, tz),
   },
-  { header: 'Checksum (SHA-256)', cell: (l) => toSheetText(l.checksum) },
-  { header: 'Proof Image URL', cell: (l) => toSheetText(l.proofImageUrl) },
+  {
+    key: 'checksum',
+    header: 'Checksum (SHA-256)',
+    aliases: ['Checksum'],
+    cell: (l) => toSheetText(l.checksum),
+  },
+  {
+    key: 'proofImageUrl',
+    header: 'Proof Image URL',
+    cell: (l) => toSheetText(l.proofImageUrl),
+  },
 ];
 
-/** Header row written to row 1 of the sheet. */
+/** Header row written to row 1 of an empty sheet. */
 export const DAILY_LOG_SHEET_HEADERS: readonly string[] =
   DAILY_LOG_SHEET_COLUMNS.map((c) => c.header);
 
-/** Maps one DailyLog to a row whose cells follow `DAILY_LOG_SHEET_HEADERS`. */
+function normalizeHeaderName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+const COLUMN_BY_HEADER = new Map<string, SheetColumn>();
+for (const column of DAILY_LOG_SHEET_COLUMNS) {
+  COLUMN_BY_HEADER.set(normalizeHeaderName(column.header), column);
+  for (const alias of column.aliases ?? []) {
+    COLUMN_BY_HEADER.set(normalizeHeaderName(alias), column);
+  }
+}
+
+export type ResolvedSheetColumnsResult =
+  | { ok: true; columns: (SheetColumn | null)[] }
+  | { ok: false; reason: string };
+
+/**
+ * Resolves a sheet's existing row 1 headers to `DAILY_LOG_SHEET_COLUMNS` by
+ * name/alias. Unknown columns map to `null` (written as empty cells). Fails if
+ * any field appears more than once or neither "Transaction ID" nor "Log ID"
+ * is present.
+ */
+export function resolveSheetColumns(
+  headerRow: readonly string[],
+): ResolvedSheetColumnsResult {
+  let lastNonEmpty = headerRow.length - 1;
+  while (lastNonEmpty >= 0 && headerRow[lastNonEmpty].trim() === '') {
+    lastNonEmpty -= 1;
+  }
+  const trimmedHeaders = headerRow.slice(0, lastNonEmpty + 1);
+
+  const seen = new Map<string, number>();
+  const columns: (SheetColumn | null)[] = [];
+  let hasIdColumn = false;
+
+  for (let i = 0; i < trimmedHeaders.length; i += 1) {
+    const rawHeader = trimmedHeaders[i].trim();
+    if (rawHeader === '') {
+      columns.push(null);
+      continue;
+    }
+
+    const matched = COLUMN_BY_HEADER.get(normalizeHeaderName(rawHeader));
+    if (!matched) {
+      columns.push(null);
+      continue;
+    }
+
+    const firstIndex = seen.get(matched.key);
+    if (firstIndex !== undefined) {
+      return {
+        ok: false,
+        reason:
+          `duplicate field "${matched.header}" at column ${columnLetter(firstIndex + 1)} ` +
+          `and column ${columnLetter(i + 1)}`,
+      };
+    }
+
+    seen.set(matched.key, i);
+    if (matched.key === 'id' || matched.key === 'transactionId') {
+      hasIdColumn = true;
+    }
+    columns.push(matched);
+  }
+
+  if (!hasIdColumn) {
+    return {
+      ok: false,
+      reason: 'row 1 must include "Transaction ID" or "Log ID"',
+    };
+  }
+
+  return { ok: true, columns };
+}
+
+/** Maps one DailyLog to a row whose cells follow `columns`. */
 export function mapDailyLogToRow(
   log: SheetDailyLog,
   options: SheetRowOptions = {},
+  columns: readonly (SheetColumn | null)[] = DAILY_LOG_SHEET_COLUMNS,
 ): SheetRow {
   const timeZone = options.timeZone ?? 'Asia/Bangkok';
-  return DAILY_LOG_SHEET_COLUMNS.map((column) => column.cell(log, timeZone));
+  return columns.map((column) =>
+    column ? column.cell(log, timeZone) : EMPTY,
+  );
 }
 
 /** Maps DailyLogs to rows, keeping the input order. */
 export function mapDailyLogsToRows(
   logs: readonly SheetDailyLog[],
   options: SheetRowOptions = {},
+  columns: readonly (SheetColumn | null)[] = DAILY_LOG_SHEET_COLUMNS,
 ): SheetRow[] {
-  return logs.map((log) => mapDailyLogToRow(log, options));
+  return logs.map((log) => mapDailyLogToRow(log, options, columns));
 }
 
 /** Converts a 1-based column number to its A1 letter (1 → A, 27 → AA). */

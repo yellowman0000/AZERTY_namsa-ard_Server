@@ -5,6 +5,7 @@ import {
   formatSheetDateTime,
   mapDailyLogToRow,
   mapDailyLogsToRows,
+  resolveSheetColumns,
   roundTo,
   SheetDailyLog,
   toSheetText,
@@ -306,6 +307,42 @@ describe('DailyLog → Google Sheets row mapper (Story 03 – KES & Proof Image 
 
     it('columnLetter rejects invalid input', () => {
       expect(() => columnLetter(0)).toThrow(RangeError);
+    });
+  });
+
+  describe('resolveSheetColumns', () => {
+    it('maps hand-made aliases in custom order and leaves unknown columns null', () => {
+      const result = resolveSheetColumns([
+        'Transaction ID',
+        'Reported Cash',
+        'Anomaly Status',
+        'Custom Note',
+        'Checksum',
+        '',
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.columns).toHaveLength(5);
+      expect(mapDailyLogToRow(fullLog, {}, result.columns)).toEqual([
+        'TXN-20261031-001',
+        950,
+        false,
+        '',
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      ]);
+    });
+
+    it('rejects duplicate fields even via aliases', () => {
+      const result = resolveSheetColumns([
+        'Transaction ID',
+        'Reported Cash (KES)',
+        'Reported Cash',
+      ]);
+      expect(result).toEqual({
+        ok: false,
+        reason: expect.stringContaining('column B and column C'),
+      });
     });
   });
 });

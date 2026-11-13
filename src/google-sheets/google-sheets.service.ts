@@ -2,8 +2,11 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { GoogleSheetsConfig } from './google-sheets.config';
 import {
   columnLetter,
+  DAILY_LOG_SHEET_COLUMNS,
   DAILY_LOG_SHEET_HEADERS,
   mapDailyLogsToRows,
+  resolveSheetColumns,
+  SheetColumn,
   SheetDailyLog,
   SheetRow,
 } from './daily-log-row.mapper';
@@ -56,6 +59,7 @@ export class GoogleSheetsService implements OnModuleInit {
   private readonly logger = new Logger(GoogleSheetsService.name);
   private client?: SheetsClient;
   private headerReady = false;
+  private resolvedColumns?: (SheetColumn | null)[];
 
   constructor(
     @Inject(GOOGLE_SHEETS_CONFIG) private readonly config: GoogleSheetsConfig,
@@ -90,7 +94,9 @@ export class GoogleSheetsService implements OnModuleInit {
   }
 
   private get lastColumn(): string {
-    return columnLetter(DAILY_LOG_SHEET_HEADERS.length);
+    return columnLetter(
+      (this.resolvedColumns ?? DAILY_LOG_SHEET_COLUMNS).length,
+    );
   }
 
   private getClient(): SheetsClient {
@@ -144,21 +150,21 @@ export class GoogleSheetsService implements OnModuleInit {
   }
 
   /**
-   * Makes sure row 1 holds `DAILY_LOG_SHEET_HEADERS`. Writes the header row on
-   * an empty sheet; refuses to continue if row 1 holds different headers, since
-   * appending would then put values under the wrong columns. Extra trailing
-   * header cells (manual columns added after ours) are allowed.
+   * Reads row 1 and maps each column by header name/alias. Writes the default
+   * header row on an empty sheet; refuses to continue if row 1 names a field
+   * twice or omits both "Transaction ID" and "Log ID". Unknown columns are left
+   * empty when appending rows.
    */
   async ensureHeaderRow(): Promise<void> {
     if (this.headerReady) return;
     const client = this.getClient();
-    const range = `${this.sheetRangePrefix}!A1:${this.lastColumn}1`;
+    const readRange = `${this.sheetRangePrefix}!1:1`;
 
     let existing: string[];
     try {
       const { data } = await client.spreadsheets.values.get({
         spreadsheetId: this.config.spreadsheetId,
-        range,
+        range: readRange,
       });
       existing = (data.values?.[0] ?? []).map((v) =>
         typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
@@ -174,10 +180,11 @@ export class GoogleSheetsService implements OnModuleInit {
     }
 
     if (existing.every((cell) => cell === '')) {
+      const writeRange = `${this.sheetRangePrefix}!A1:${columnLetter(DAILY_LOG_SHEET_HEADERS.length)}1`;
       try {
         await client.spreadsheets.values.update({
           spreadsheetId: this.config.spreadsheetId,
-          range,
+          range: writeRange,
           valueInputOption: 'RAW',
           requestBody: {
             majorDimension: 'ROWS',
@@ -192,27 +199,29 @@ export class GoogleSheetsService implements OnModuleInit {
         );
       }
       this.logger.log(`Wrote header row to tab "${this.config.sheetName}"`);
+      this.resolvedColumns = [...DAILY_LOG_SHEET_COLUMNS];
       this.headerReady = true;
       return;
     }
 
-    const mismatch = DAILY_LOG_SHEET_HEADERS.findIndex(
-      (header, i) => existing[i] !== header,
-    );
-    if (mismatch !== -1) {
+    const resolved = resolveSheetColumns(existing);
+    if (!resolved.ok) {
       throw new GoogleSheetsSyncError(
-        `Header mismatch in tab "${this.config.sheetName}" at column ` +
-          `${columnLetter(mismatch + 1)}: expected "${DAILY_LOG_SHEET_HEADERS[mismatch]}", ` +
-          `found "${existing[mismatch] ?? ''}". Fix the header row before syncing.`,
+        `Header mismatch in tab "${this.config.sheetName}": ${resolved.reason}. Fix the header row before syncing.`,
         { kind: 'HEADER_MISMATCH', retryable: false },
       );
     }
+    this.resolvedColumns = resolved.columns;
     this.headerReady = true;
   }
 
   /** Formats DailyLogs into sheet rows using the configured time zone. */
   formatRows(logs: readonly SheetDailyLog[]): SheetRow[] {
-    return mapDailyLogsToRows(logs, { timeZone: this.config.timeZone });
+    return mapDailyLogsToRows(
+      logs,
+      { timeZone: this.config.timeZone },
+      this.resolvedColumns ?? DAILY_LOG_SHEET_COLUMNS,
+    );
   }
 
   /**
@@ -266,6 +275,7 @@ export class GoogleSheetsService implements OnModuleInit {
       // A header problem may be fixed by hand; re-check it on the next attempt.
       if (error.kind === 'HEADER_MISMATCH' || error.kind === 'NOT_FOUND') {
         this.headerReady = false;
+        this.resolvedColumns = undefined;
       }
       this.logger.warn(
         `${error.message} [rows=${rowIds.length}, retryable=${error.retryable}]`,

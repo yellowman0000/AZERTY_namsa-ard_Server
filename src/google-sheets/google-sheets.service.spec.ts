@@ -286,7 +286,7 @@ describe('GoogleSheetsService (Story 03)', () => {
 
       expect(client.spreadsheets.values.get).toHaveBeenCalledWith({
         spreadsheetId: 'sheet-123',
-        range: "'DailyLogs'!A1:O1",
+        range: "'DailyLogs'!1:1",
       });
       expect(client.spreadsheets.values.update).toHaveBeenCalledWith({
         spreadsheetId: 'sheet-123',
@@ -309,6 +309,72 @@ describe('GoogleSheetsService (Story 03)', () => {
       await service.ensureHeaderRow();
 
       expect(client.spreadsheets.values.update).not.toHaveBeenCalled();
+    });
+
+    it('matches a hand-made header layout by name/alias and leaves unknown columns empty', async () => {
+      const client = makeFakeClient([
+        'Log ID',
+        'Transaction ID',
+        'Kiosk ID',
+        'Operator ID',
+        'Water Type',
+        'Meter Volume (L)',
+        'Reported Cash',
+        'Expected Revenue',
+        'Variance',
+        'Anomaly Status',
+        'Proof Image URL',
+        'Recorded At',
+        'Checksum',
+        'Manager Notes',
+      ]);
+      const { service } = await createService(enabledConfig, client);
+
+      const result = await service.appendDailyLogs([makeLog('a')]);
+
+      expect(client.spreadsheets.values.update).not.toHaveBeenCalled();
+      expect(client.spreadsheets.values.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          range: "'DailyLogs'!A:N",
+          requestBody: {
+            majorDimension: 'ROWS',
+            values: [
+              [
+                'a',
+                'TXN-a',
+                'KIOSK-001',
+                'OP-104',
+                '',
+                500,
+                950,
+                1000,
+                -50,
+                false,
+                '',
+                '2026-10-31 17:00:00',
+                'abc123',
+                '',
+              ],
+            ],
+          },
+        }),
+      );
+      expect(result.syncedLogIds).toEqual(['a']);
+    });
+
+    it('refuses to append when row 1 omits both Transaction ID and Log ID', async () => {
+      const client = makeFakeClient(['Kiosk ID', 'Reported Cash']);
+      const { service } = await createService(enabledConfig, client);
+
+      await expect(
+        service.appendDailyLogs([makeLog('a')]),
+      ).rejects.toMatchObject({
+        kind: 'HEADER_MISMATCH',
+        retryable: false,
+        rowIds: ['a'],
+        message: expect.stringContaining('"Transaction ID" or "Log ID"'),
+      });
+      expect(client.spreadsheets.values.append).not.toHaveBeenCalled();
     });
 
     it('refuses to append when the header row does not match', async () => {
