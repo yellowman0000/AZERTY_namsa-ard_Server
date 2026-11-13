@@ -35,6 +35,23 @@ import type { ReadingTypeDto } from './dto/ingest-log.dto';
 
 const MAX_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024;
 
+/**
+ * Story 01 – a kiosk is ONLINE while its last heartbeat is at most this old.
+ * Shared by the background sweeper, the single-kiosk status read and the
+ * manager dashboard's fleet snapshot so the three can never disagree.
+ */
+export const HEARTBEAT_TIMEOUT_SECONDS = 30;
+
+/** One kiosk in the manager dashboard's fleet snapshot. */
+export interface KioskStatusSnapshot {
+  kioskId: string;
+  /** Effective status: computed from `lastHeartbeat`, not the stored column. */
+  status: 'ONLINE' | 'OFFLINE';
+  lastHeartbeat: Date | null;
+  /** Seconds since the last heartbeat, rounded; `null` when never pinged. */
+  secondsSinceLastPing: number | null;
+}
+
 const EVIDENCE_FILE_TYPES = {
   'image/jpeg': {
     extension: 'jpg',
@@ -175,11 +192,12 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Proactively sweeps all kiosks in the database and marks any kiosk whose
-   * heartbeat has ceased for more than 30 seconds as OFFLINE.
+   * heartbeat has ceased for more than {@link HEARTBEAT_TIMEOUT_SECONDS} as
+   * OFFLINE.
    */
   async sweepStaleKiosks(): Promise<number> {
     if (!this.prisma?.kiosk?.updateMany) return 0;
-    const cutoff = new Date(Date.now() - 30 * 1000);
+    const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_SECONDS * 1000);
     const result = await this.prisma.kiosk.updateMany({
       where: {
         status: 'ONLINE',
@@ -439,7 +457,8 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
     }
 
     const diffSeconds = (Date.now() - kiosk.lastHeartbeat.getTime()) / 1000;
-    const currentStatus = diffSeconds > 30 ? 'OFFLINE' : 'ONLINE';
+    const currentStatus =
+      diffSeconds > HEARTBEAT_TIMEOUT_SECONDS ? 'OFFLINE' : 'ONLINE';
 
     // If disconnected 30 sec, update status to OFFLINE
     if (currentStatus === 'OFFLINE' && kiosk.status !== 'OFFLINE') {
@@ -455,6 +474,48 @@ export class KioskService implements OnModuleInit, OnModuleDestroy {
       lastHeartbeat: kiosk.lastHeartbeat,
       secondsSinceLastPing: Math.round(diffSeconds),
     };
+  }
+
+  /**
+   * Story 01 – fleet snapshot for the manager dashboard
+   * (`GET /api/kiosk/status`).
+   *
+   * Returns one entry per registered kiosk, ordered by id. The status is the
+   * effective heartbeat status (the same 30 s rule as `getKioskStatus`), so the
+   * dashboard never shows a row the background sweeper has not caught up with.
+   * This read never writes: persisting OFFLINE stays the sweeper's job, and the
+   * single-kiosk route keeps its own write-on-read behaviour.
+   */
+  async listKioskStatuses(): Promise<KioskStatusSnapshot[]> {
+    if (typeof this.prisma?.kiosk?.findMany !== 'function') return [];
+
+    const kiosks = await this.prisma.kiosk.findMany({
+      select: { id: true, status: true, lastHeartbeat: true },
+      orderBy: { id: 'asc' },
+    });
+
+    const now = Date.now();
+    return kiosks.map((kiosk) => {
+      if (!kiosk.lastHeartbeat) {
+        return {
+          kioskId: kiosk.id,
+          status: 'OFFLINE' as const,
+          lastHeartbeat: null,
+          secondsSinceLastPing: null,
+        };
+      }
+
+      const diffSeconds = (now - kiosk.lastHeartbeat.getTime()) / 1000;
+      return {
+        kioskId: kiosk.id,
+        status:
+          diffSeconds > HEARTBEAT_TIMEOUT_SECONDS
+            ? ('OFFLINE' as const)
+            : ('ONLINE' as const),
+        lastHeartbeat: kiosk.lastHeartbeat,
+        secondsSinceLastPing: Math.max(0, Math.round(diffSeconds)),
+      };
+    });
   }
 
   // ───────────────────────────────────────────────────────────

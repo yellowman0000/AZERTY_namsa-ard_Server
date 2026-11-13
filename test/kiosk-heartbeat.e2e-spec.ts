@@ -23,6 +23,17 @@ const createInMemoryPrisma = () => {
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
         kiosks.has(where.id) ? { ...kiosks.get(where.id)! } : null,
       ),
+      // Fleet snapshot (`GET /api/kiosk/status`): every registered kiosk by id.
+      findMany: jest.fn(
+        async (args?: { orderBy?: { id?: 'asc' | 'desc' } }) =>
+          [...kiosks.values()]
+            .sort(
+              (a, b) =>
+                a.id.localeCompare(b.id) *
+                (args?.orderBy?.id === 'desc' ? -1 : 1),
+            )
+            .map((row) => ({ ...row })),
+      ),
       upsert: jest.fn(
         async ({
           where,
@@ -250,6 +261,84 @@ describe('Kiosk heartbeat (e2e)', () => {
       expect((await status('KIOSK-002').expect(200)).body.status).toBe(
         'ONLINE',
       );
+    });
+  });
+
+  describe('GET /api/kiosk/status (manager dashboard fleet snapshot)', () => {
+    const fleet = () => request(app.getHttpServer()).get('/api/kiosk/status');
+
+    it('should list every registered kiosk, ordered by id, with counts', async () => {
+      await ping('KIOSK-002').expect(201);
+      await ping('KIOSK-001').expect(201);
+      advanceSeconds(4);
+
+      const res = await fleet().expect(200);
+
+      expect(res.body.count).toBe(2);
+      expect(res.body.onlineCount).toBe(2);
+      expect(res.body.staleAfterSeconds).toBe(30);
+      expect(
+        res.body.kiosks.map((kiosk: { kioskId: string }) => kiosk.kioskId),
+      ).toEqual(['KIOSK-001', 'KIOSK-002']);
+      expect(res.body.kiosks[0]).toEqual({
+        kioskId: 'KIOSK-001',
+        status: 'ONLINE',
+        lastHeartbeat: T0.toISOString(),
+        secondsSinceLastPing: 4,
+      });
+    });
+
+    it('should return an empty fleet before any kiosk pings', async () => {
+      const res = await fleet().expect(200);
+
+      expect(res.body).toEqual({
+        count: 0,
+        onlineCount: 0,
+        staleAfterSeconds: 30,
+        kiosks: [],
+      });
+    });
+
+    it('should flip every quiet kiosk to OFFLINE after 31s without writing', async () => {
+      await ping('KIOSK-001').expect(201);
+      advanceSeconds(31);
+
+      const res = await fleet().expect(200);
+
+      expect(res.body.onlineCount).toBe(0);
+      expect(res.body.kiosks[0]).toMatchObject({
+        kioskId: 'KIOSK-001',
+        status: 'OFFLINE',
+        secondsSinceLastPing: 31,
+      });
+      // The snapshot is read-only: the sweeper persists OFFLINE, not this GET.
+      expect(prisma.kiosks.get('KIOSK-001')!.status).toBe('ONLINE');
+    });
+
+    it('should evaluate each kiosk independently', async () => {
+      await ping('KIOSK-001').expect(201);
+      advanceSeconds(20);
+      await ping('KIOSK-002').expect(201);
+      advanceSeconds(15);
+
+      const res = await fleet().expect(200);
+
+      expect(
+        Object.fromEntries(
+          res.body.kiosks.map(
+            (kiosk: { kioskId: string; status: string }) => [
+              kiosk.kioskId,
+              kiosk.status,
+            ],
+          ),
+        ),
+      ).toEqual({ 'KIOSK-001': 'OFFLINE', 'KIOSK-002': 'ONLINE' });
+    });
+
+    it('should also be reachable on the /kiosk/status alias', async () => {
+      await ping().expect(201);
+
+      await request(app.getHttpServer()).get('/kiosk/status').expect(200);
     });
   });
 });

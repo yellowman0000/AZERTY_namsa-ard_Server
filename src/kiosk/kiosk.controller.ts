@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { KioskService } from './kiosk.service';
+import { HEARTBEAT_TIMEOUT_SECONDS, KioskService } from './kiosk.service';
 import { ReconciliationService } from './reconciliation.service';
 import { IngestLogDto } from './dto/ingest-log.dto';
 import { MarkSeenDto } from './dto/mark-seen.dto';
@@ -231,6 +231,21 @@ export class KioskController {
   @Post('heartbeat')
   async receiveHeartbeat(@Body('kioskId') kioskId: string) {
     return this.kioskService.handleHeartbeat(kioskId || 'KIOSK-001');
+  }
+
+  // GET http://localhost:3001/api/kiosk/status
+  // Fleet heartbeat snapshot for the manager dashboard: every registered kiosk
+  // with its effective ONLINE/OFFLINE status (30 s rule) and heartbeat age.
+  // Read-only — the background sweeper persists OFFLINE transitions.
+  @Get('status')
+  async listKioskStatus() {
+    const kiosks = await this.kioskService.listKioskStatuses();
+    return {
+      count: kiosks.length,
+      onlineCount: kiosks.filter((kiosk) => kiosk.status === 'ONLINE').length,
+      staleAfterSeconds: HEARTBEAT_TIMEOUT_SECONDS,
+      kiosks,
+    };
   }
 
   // GET http://localhost:3001/api/kiosk/status/KIOSK-001

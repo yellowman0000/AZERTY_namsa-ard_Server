@@ -52,7 +52,7 @@ Server runs on `http://localhost:3001` by default.
 A daily log reaches Google Sheets only after a manager accepts the operator
 receipt on the dashboard:
 
-1. The manager opens **Operations review** in the operator console and clicks
+1. The manager opens the **Manager dashboard** in the operator console and clicks
    **Review** on a record (evidence photo, figures, checksum check).
 2. **Accept** calls `POST /api/kiosk/logs/:id/accept` (optional body
    `{ "managerId": "..." }`). The server stamps `acceptedAt` / `acceptedBy`
@@ -60,6 +60,12 @@ receipt on the dashboard:
 3. The response reports `sheet.status`: `SYNCED`, `ALREADY_SYNCED` (accepting
    twice never adds a second row), `PENDING` (Sheets failed; the cron job below
    retries it) or `DISABLED` (Sheets is not configured).
+
+The server writes values under the sheet's own header row (row 1), matched by
+name, so a hand-made layout works: any order, and names such as "Reported Cash",
+"Anomaly Status" or "Checksum". Unknown columns are left empty. Row 1 must
+include "Transaction ID" or "Log ID" and must not name a field twice. An empty
+sheet gets the server's full header row.
 
 Marking a log as seen (`PATCH /api/kiosk/logs/mark-seen`) no longer sends it to
 Google Sheets. After pulling this change, run `bunx prisma db push` to add the
@@ -88,6 +94,7 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | Method | Path                                                  | Description                                   |
 | ------ | ----------------------------------------------------- | --------------------------------------------- |
 | POST   | `/api/kiosk/heartbeat`                                | Kiosk heartbeat — body `{ "kioskId": "KIOSK-001" }` |
+| GET    | `/api/kiosk/status`                                   | Fleet snapshot for the manager dashboard — every registered kiosk with its effective `ONLINE` / `OFFLINE` status and heartbeat age (see below) |
 | GET    | `/api/kiosk/status/:id`                               | Get kiosk status (`ONLINE` / `OFFLINE`)       |
 | POST   | `/api/kiosk/logs`<br>*(or `/daily-submission`)*       | Ingest daily log / meter volume & cash submission — returns server ACK with signed tamper-evident receipt |
 | POST   | `/api/kiosk/logs/:transactionId/evidence`              | Upload one JPEG, PNG, or WebP evidence photo (max 5 MB) to imgBB; returns `proofImageUrl` |
@@ -96,6 +103,35 @@ All routes are also available under the legacy `/kiosk/*` alias and direct root 
 | GET    | `/api/kiosk/logs/:id/inspect`                         | Read-only log details with live checksum verification (see below) |
 | GET    | `/api/kiosk/reconciliation?kioskId=&isAnomaly=&startDate=&endDate=` | Interpreted daily logs: revenue metrics, variance ratios, and ±30 % volume-anomaly flags (see below) |
 | POST   | `/api/kiosk/reconciliation/run`                       | Run the daily batch reconciliation engine — recomputes and persists expected revenue, variance and anomaly flags; returns a summary |
+
+### Heartbeat and kiosk status (Story 01)
+
+Kiosks ping `POST /api/kiosk/heartbeat` every 10 seconds. A kiosk is **`ONLINE`**
+while its last heartbeat is at most **30 seconds** old, and **`OFFLINE`**
+otherwise; a kiosk that has never pinged is `OFFLINE` with a `null` heartbeat.
+The background sweeper persists `OFFLINE` transitions every 5 seconds.
+
+`GET /api/kiosk/status/:id` returns one kiosk and persists a stale row as
+`OFFLINE`. `GET /api/kiosk/status` is the **read-only fleet snapshot** the
+manager dashboard's kiosk cards poll:
+
+```json
+{
+  "count": 3,
+  "onlineCount": 2,
+  "staleAfterSeconds": 30,
+  "kiosks": [
+    { "kioskId": "KIOSK-001", "status": "ONLINE",  "lastHeartbeat": "2026-11-13T14:55:01.234Z", "secondsSinceLastPing": 4 },
+    { "kioskId": "KIOSK-002", "status": "ONLINE",  "lastHeartbeat": "2026-11-13T14:54:46.000Z", "secondsSinceLastPing": 19 },
+    { "kioskId": "KIOSK-003", "status": "OFFLINE", "lastHeartbeat": null, "secondsSinceLastPing": null }
+  ]
+}
+```
+
+Every registered kiosk appears once, ordered by id; `status` is the effective
+heartbeat status (the same 30-second rule as the single-kiosk route), while the
+stored column is only changed by the sweeper. `secondsSinceLastPing` is rounded
+and clamped to zero; it is `null` when the kiosk has never pinged.
 
 `GET /api/kiosk/logs/:id/inspect` recomputes the SHA-256 checksum from the
 row's **current** database values and compares it with the checksum stored at

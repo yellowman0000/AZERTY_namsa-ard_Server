@@ -125,7 +125,7 @@ Properties:
   dependency; disabled under `NODE_ENV=test`). The scheduler logs a summary line per run.
 - **No double counting** — `isAnomaly` is classified with the moving average only;
   revenue variance is reported separately via `variance` / `hasVariance` /
-  `isCashShortfall`, matching the Operations Review UI rule
+  `isCashShortfall`, matching the Manager dashboard UI rule
   (*highlight `isAnomaly === true` OR `variance < 0`*).
 
 ---
@@ -264,5 +264,5 @@ real Nest controller + validation pipeline against an in-memory Prisma fake.
 - [x] Volume drops/spikes beyond ±30 % of the kiosk's moving average are automatically
       classified as anomalies and persisted in `DailyLog.isAnomaly`.
 - [x] Query endpoint serves the interpreted records (with derived variance metrics and
-      anomaly flags) for the Operations Review UI.
+      anomaly flags) for the Manager dashboard UI.
 - [x] Unit, boundary and API-integration tests green; lint and build clean.
